@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>1. Claude Apps Gateway 개요</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<p class="kicker">Lesson 1 · 개요</p>
+<h1>Claude Apps Gateway 개요</h1>
+<p class="subtitle">개발자와 모델 사이에서 자격증명·권한·설정·사용량을 한 곳으로 모으는 서버.</p>
+
+<h2>정의</h2>
+<p>
+Claude Apps Gateway는 <code>claude</code> 바이너리에 내장된 자체 호스팅(self-hosted) 게이트웨이 서버다. Claude Code를 실행하는 것과 동일한 실행 파일에 <code>claude gateway --config gateway.yaml</code> 명령을 주면 게이트웨이 서버로 동작한다. LiteLLM 같은 범용 LLM 게이트웨이를 쓸 때와 달리, 별도의 프록시 서버를 따로 내려받아 설치할 필요가 없다.
+</p>
+<p>
+이 서버는 개발자의 Claude Code 클라이언트와 모델 업스트림(Amazon Bedrock 등) 사이에 위치한다. 자체 클라우드 제공자를 통해 추론을 라우팅해야 하거나 그렇게 하기를 선호하는 조직, 예를 들어 데이터 레지던시(data residency) 요건이 있는 조직을 위해 설계되었다.
+</p>
+
+<div class="callout">
+<strong>"바이너리에 내장"의 제약 — 서버는 Linux 네이티브 바이너리에서만 동작한다.</strong>
+Claude Code는 네이티브 바이너리로 설치하거나 Node.js 위에서 실행하는 두 방식이 있는데, 게이트웨이 서버 모드(<code>claude gateway</code>)는 네이티브 바이너리에서만 동작한다. 운영체제 제약도 있다. 서버로 정식 지원되는 것은 <strong>Linux 네이티브 바이너리</strong>뿐이고, macOS는 로컬 개발·테스트용, Windows는 서버로 지원되지 않는다. 이 제약은 게이트웨이를 <em>서버로 띄우는 쪽</em>에만 적용되며, 개발자가 자기 노트북(macOS 등)에서 클라이언트로 Claude Code를 쓰는 것과는 무관하다.
+</div>
+
+<div class="callout">
+<strong>데이터 레지던시(data residency)란?</strong>
+데이터가 물리적으로 어느 나라·지역에서 저장·처리되는지에 대한 요건이다. 규제(예: 한국 금융·공공의 국내 리전 처리, 유럽 GDPR)나 내부 정책 때문에 "데이터가 특정 지역 밖으로 나가면 안 된다"는 제약이 있는 경우다. Claude Code를 Anthropic 운영 API로 바로 쓰면 추론 요청이 Anthropic 인프라로 전송되지만, 게이트웨이를 두면 요청이 조직이 지정한 업스트림(예: 특정 AWS 리전의 Amazon Bedrock)으로 라우팅되어, 추론이 처리되는 위치를 조직이 직접 통제할 수 있다.
+</div>
+
+<h2>무엇을 중앙화하는가</h2>
+<p>
+게이트웨이가 없으면 각 개발자가 자신의 업스트림 자격증명(API 키나 클라우드 자격증명)을 직접 보유하고, 각자의 환경을 개별적으로 설정한다. 게이트웨이는 이렇게 개발자마다 흩어져 있던 네 가지 — 업스트림 자격증명, 모델 접근 권한, 개발자 환경 설정(Managed Settings), 사용량 텔레메트리 — 를 게이트웨이 한 곳에서 관리하도록 모은다. 아래 표는 이 네 가지를 게이트웨이 도입 전후로 대조한 것이다.
+</p>
+<table>
+<tr><th>중앙화 영역</th><th>게이트웨이의 동작</th></tr>
+<tr><td>자격증명</td><td>게이트웨이만 업스트림 자격증명을 보관하고, 개발자는 회사 IdP로 SSO 로그인</td></tr>
+<tr><td>접근 제어</td><td>IdP 그룹을 모델 allowlist에 매핑하고, 요청 시 서버 측에서 거부</td></tr>
+<tr><td>설정 전달</td><td>로그인한 사용자에게 사용자 단위로 동적 전달</td></tr>
+<tr><td>텔레메트리</td><td>게이트웨이가 수집해 지정한 목적지로 중계(OTLP/HTTP)</td></tr>
+</table>
+
+<p>
+이 모든 동작은 <code>gateway.yaml</code> 설정 파일 하나로 정의된다. 파일의 실제 형태와 각 블록의 의미는 <a href="0002-components.html">Lesson 2</a>에서 다룬다.
+</p>
+
+<h2>개발자 인증 방식</h2>
+<p>
+개발자는 API 키를 발급받아 보관하지 않는다. 대신 브라우저로 회사 IdP에 SSO 로그인하고, 로그인이 끝나면 게이트웨이가 발급한 단기 세션 토큰(JWT)으로 인증한다. 이 토큰의 기본 유효 기간은 1시간이다. IdP에서 계정이 비활성화되면 다음 토큰 갱신 시점에 접근이 차단되므로, 권한 회수는 IdP에서 계정을 끄는 것만으로 이루어진다.
+</p>
+
+<h2>범용 LLM 게이트웨이와의 차이</h2>
+<p>
+자격증명 중앙화와 사용량 제어라는 점에서 LiteLLM 같은 범용 LLM 게이트웨이와 겹친다. 결정적 차이는 인증 방식이다. 범용 게이트웨이에서는 개발자가 게이트웨이가 발급한 API 키를 보관하지만, Claude Apps Gateway에서는 회사 IdP SSO와 단기 세션 토큰을 사용해 개발자가 장기 자격증명을 들고 있지 않는다. 또한 별도 설치가 필요한 범용 게이트웨이와 달리 <code>claude</code> 바이너리에 내장되어 있다.
+</p>
+
+<h2>확인 퀴즈</h2>
+<div class="quiz">
+<p class="q">순수 Amazon Bedrock 환경(게이트웨이 없음)에서 지원되지 않는 것은?</p>
+<label><input type="radio" name="q1" value="a"> Bedrock 모델 호출</label>
+<label><input type="radio" name="q1" value="b" data-correct> 관리자 콘솔 기반 사용자 단위 설정 배포</label>
+<label><input type="radio" name="q1" value="c"> Claude Code 설치</label>
+<div class="feedback" data-correct-text="정답입니다. 사용자 단위 동적 배포는 게이트웨이가 필요하며, 게이트웨이 없이는 MDM 기기 단위 정적 배포만 가능합니다." data-incorrect-text="위 표의 '설정 전달' 행을 다시 확인하세요."></div>
+</div>
+
+<p class="source">
+출처: <a href="https://code.claude.com/docs/en/claude-apps-gateway" target="_blank">Claude apps gateway (공식 문서)</a>
+</p>
+
+<div class="ask-agent">
+이해가 막히는 부분은 언제든 질문하세요.
+</div>
+
+<div class="nav-links">
+<span>&larr; 시작</span>
+<span><a href="0002-components.html">다음: gateway.yaml 설정 &rarr;</a></span>
+</div>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

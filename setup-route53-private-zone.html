@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Route53 Private Hosted Zone 설정 — 게이트웨이 hostname을 VPC 안에서 resolve</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<p class="kicker">Self-guide 부록 · 네트워크</p>
+<h1>Route53 Private Hosted Zone 설정 — 게이트웨이 hostname을 VPC 안에서 resolve</h1>
+<p class="subtitle">단계 0에서 이름만 정해 둔 게이트웨이 hostname을, VPC 안에서만 유효한 사설 DNS 이름으로 만든다. 인터넷 DNS와 분리되므로 도메인을 실제로 소유하지 않아도 된다.</p>
+
+<p>
+<a href="self-guide-aws.html">실습 가이드</a>의 <strong>단계 2 · 네트워크(단일 AZ)</strong>에서 참조하는 문서다. 게이트웨이는 Private Subnet의 사설 IP로만 접근을 허용하므로, 랩탑의 CLI·브라우저가 게이트웨이에 닿으려면 그 hostname이 <strong>사설 IP로 resolve</strong>돼야 한다. private hosted zone은 이 이름→사설 IP 매핑을 <strong>VPC 내부에서만</strong> 담당하는 DNS 영역이다. 이 문서는 <strong>VPC DNS 속성 확인 → private hosted zone 생성 → (나중에) A 레코드 채우기</strong>를 순서대로 다룬다.
+</p>
+
+<div class="callout">
+<strong>이 가이드는 부모 도메인으로 zone을 만드는 관례 방식을 쓴다.</strong>
+zone 도메인 이름은 게이트웨이 hostname의 <strong>부모 도메인</strong>(<code>internal.example.com</code>)으로 만들고, 그 zone 안에 이름이 <code>claude-gw</code>인 레코드를 두어 완성 이름이 <code>claude-gw.internal.example.com</code>이 되게 한다. hosted zone은 "자기 도메인 이름과 그 하위(subdomain)에 대한 레코드를 담는 그릇"이므로, 부모 도메인으로 zone을 만들면 <code>claude-gw</code>, <code>db</code>, <code>api</code> 같은 형제 이름을 <strong>같은 층위에 나란히</strong> 추가할 수 있다. 게이트웨이 외에 이름 있는 리소스를 더 두거나 운영 환경으로 확장할 때 이 방식이 자연스럽다.
+</div>
+
+<div class="callout">
+<strong>지금은 zone만 준비하고, A 레코드는 단계 5에서 채운다.</strong>
+게이트웨이 hostname의 A 레코드는 gateway Task(ECS)의 사설 IP가 정해져야 채울 수 있는데, 그 IP는 <a href="self-guide-aws.html">실습 가이드</a> 단계 5에서 나온다. 그래서 단계 2에서는 <strong>빈 zone을 만들어 VPC에 연결</strong>하는 데까지만 하고, 레코드 값은 이후에 채운다. 이 문서의 4절은 그 나중 작업을 미리 정리해 둔 것이다.
+</div>
+
+<h2>1 · 사전 조건 — VPC DNS 속성 두 개</h2>
+<p>
+private hosted zone은 VPC의 두 DNS 속성이 <strong>모두 <code>true</code></strong>여야 동작한다. 하나라도 꺼져 있으면 zone을 만들어도 이름이 resolve되지 않는다.
+</p>
+<ul>
+<li><strong><code>enableDnsSupport</code></strong> — VPC 안에서 Amazon DNS 서버(VPC Route53 Resolver, <code>VPC CIDR + 2</code> = <code>10.0.0.2</code>)로의 DNS 질의가 동작하게 한다. private hosted zone의 레코드는 이 Resolver를 통해 응답된다.</li>
+<li><strong><code>enableDnsHostnames</code></strong> — VPC의 인스턴스가 DNS hostname을 받도록 한다. AWS 공식 안내상 <strong>DNS support가 켜져 있어야만 DNS hostnames를 켤 수 있다</strong>(순서 주의).</li>
+</ul>
+<p>현재 값 확인:</p>
+<pre><code>VPC_ID="vpc-xxxxxxxx"   # 단계 2에서 만든 VPC의 ID
+
+aws ec2 describe-vpc-attribute --vpc-id ${VPC_ID} --attribute enableDnsSupport
+aws ec2 describe-vpc-attribute --vpc-id ${VPC_ID} --attribute enableDnsHostnames
+# → 각각 "Value": true 여야 정상</code></pre>
+<p><code>false</code>이면 다음으로 켠다(DNS support를 먼저 켠다):</p>
+<pre><code>aws ec2 modify-vpc-attribute --vpc-id ${VPC_ID} --enable-dns-support   "{\"Value\":true}"
+aws ec2 modify-vpc-attribute --vpc-id ${VPC_ID} --enable-dns-hostnames "{\"Value\":true}"
+# 성공하면 출력이 없다</code></pre>
+
+<h2>2 · Private Hosted Zone 생성 (콘솔)</h2>
+<ol>
+<li>Route53 콘솔(<a href="https://console.aws.amazon.com/route53/" target="_blank">console.aws.amazon.com/route53</a>)에서 왼쪽 <strong>Hosted zones</strong> → <strong>Create hosted zone</strong>.</li>
+<li><strong>Domain name</strong> — 게이트웨이 hostname의 <strong>부모 도메인</strong>을 입력한다(예: <code>internal.example.com</code>). 단계 0의 hostname이 <code>claude-gw.internal.example.com</code>이면, 그 앞의 <code>claude-gw</code>를 뺀 나머지가 부모 도메인이다.</li>
+<li><strong>Type</strong> — <strong>Private hosted zone</strong>을 선택한다.</li>
+<li><strong>VPCs to associate with the hosted zone</strong> — Region은 <code>us-east-1</code>, VPC는 단계 2에서 만든 VPC를 선택한다.</li>
+<li><strong>Create hosted zone</strong>을 눌러 생성한다. 이 시점에는 (Route53이 자동 생성하는 NS·SOA 레코드 외에) 게이트웨이용 레코드가 없는 빈 zone이다.</li>
+</ol>
+
+<div class="callout">
+<strong>zone 이름과 hostname의 관계 (헷갈리기 쉬운 지점).</strong>
+zone 도메인 이름(<code>internal.example.com</code>)은 게이트웨이 hostname 전체(<code>claude-gw.internal.example.com</code>)와 <strong>다르다</strong>. hostname은 이 zone 안의 <code>claude-gw</code> 레코드로 표현되며, "레코드 이름(<code>claude-gw</code>) + zone 이름(<code>internal.example.com</code>)"이 합쳐져 완성 이름이 된다. 즉 <strong>단계 0의 hostname을 그대로 zone 이름에 넣지 않는다</strong> — 부모 도메인만 넣고, hostname은 4절에서 <code>claude-gw</code> 레코드로 채운다.
+</div>
+
+<h3>참고 — CLI로 만들 경우</h3>
+<p>
+콘솔 대신 CLI로 만들 수도 있다. private zone은 <code>--vpc</code>에 <strong><code>VPCId</code>·<code>VPCRegion</code>이 필수</strong>이고, 생성 시에는 <strong>VPC 하나만</strong> 연결할 수 있다(추가 연결은 이후 <code>associate-vpc-with-hosted-zone</code>으로). <code>--caller-reference</code>는 중복 요청을 구분하는 임의의 고유 문자열이다.
+</p>
+<pre><code>aws route53 create-hosted-zone \
+  --name internal.example.com \
+  --caller-reference "$(date +%s)" \
+  --vpc VPCRegion=us-east-1,VPCId=${VPC_ID} \
+  --hosted-zone-config PrivateZone=true,Comment="claude gateway private zone"</code></pre>
+
+<h2>3 · 연결 확인</h2>
+<p>
+zone이 해당 VPC에 연결됐는지 확인한다. 이 목록에 단계 2의 VPC가 나오면 정상이다.
+</p>
+<pre><code>aws route53 list-hosted-zones-by-vpc --vpc-id ${VPC_ID} --vpc-region us-east-1</code></pre>
+
+<h2>4 · A 레코드 채우기 (단계 5에서 수행)</h2>
+<p>
+gateway Task의 사설 IP가 정해진 뒤(<a href="self-guide-aws.html">실습 가이드</a> 단계 5), 이 zone 안에 <strong>이름이 <code>claude-gw</code>인 A 레코드</strong>를 만들어 hostname → 사설 IP를 가리키게 한다. 콘솔 절차:
+</p>
+<ol>
+<li>Route53 → <strong>Hosted zones</strong>에서 2절에서 만든 private hosted zone(<code>internal.example.com</code>)을 선택하고 <strong>Create record</strong>.</li>
+<li><strong>Quick create</strong>가 보이면 <strong>Switch to wizard</strong>로 전환하고, <strong>Routing policy = Simple routing</strong>을 선택한 뒤 <strong>Next</strong>.</li>
+<li><strong>Define simple record</strong>에서:
+  <ul>
+  <li><strong>Record name</strong> — <code>claude-gw</code>를 입력한다(뒤의 <code>.internal.example.com</code>은 zone 이름이라 콘솔에 이미 붙어 있다). 완성 이름은 <code>claude-gw.internal.example.com</code>이 된다.</li>
+  <li><strong>Record type</strong> — <code>A</code>.</li>
+  <li><strong>Value</strong> — gateway Task의 <strong>사설 IP</strong>(예: <code>10.0.1.x</code>).</li>
+  <li><strong>TTL</strong> — 짧게(예: 60초) 둔다. 재배포로 IP가 바뀔 때 반영이 빠르다.</li>
+  </ul>
+</li>
+<li><strong>Define simple record</strong> → <strong>Create records</strong>로 저장한다.</li>
+</ol>
+<p>CLI로는 <code>change-resource-record-sets</code>의 <code>UPSERT</code>로 같은 작업을 한다. <code>Name</code>에는 완성 이름(FQDN)을 넣는다:</p>
+<pre><code>aws route53 change-resource-record-sets \
+  --hosted-zone-id &lt;ZONE_ID&gt; \
+  --change-batch '{
+    "Changes": [{
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "claude-gw.internal.example.com",
+        "Type": "A",
+        "TTL": 60,
+        "ResourceRecords": [{ "Value": "10.0.1.x" }]
+      }
+    }]
+  }'</code></pre>
+
+<div class="callout">
+<strong>같은 zone에 리소스를 더 추가할 때.</strong>
+이 zone은 부모 도메인이므로, 게이트웨이 외에 이름 있는 리소스를 더 두려면 <strong>같은 절차로 레코드만 추가</strong>하면 된다 — 예를 들어 Record name에 <code>db</code>를 넣으면 <code>db.internal.example.com</code>이, <code>api</code>를 넣으면 <code>api.internal.example.com</code>이 된다. 모두 <code>claude-gw</code>와 같은 층위의 형제 이름으로, zone을 새로 만들 필요가 없다.
+</div>
+
+<div class="callout">
+<strong>여기서 채운 IP는 재배포 때 바뀐다 — 자동 갱신은 Service Discovery로.</strong>
+Fargate Task에는 고정 IP를 붙일 수 없어, Task가 재생성되면 사설 IP가 바뀐다. 그러면 이 절에서 <strong>손으로 채운 A 레코드는 낡은 IP를 가리키게</strong> 되어, 재배포 때마다 다시 채워야 한다. 이 갱신을 ECS가 자동으로 하게 하려면 <a href="setup-service-discovery.html">ECS Service Discovery (AWS Cloud Map)</a>를 쓴다 — 이름이 항상 현재 Task의 IP를 따라가는 원리와 설정 절차를 그 문서에서 다룬다.
+</div>
+
+<h2>5 · resolve 확인</h2>
+<p>
+Client VPN으로 랩탑을 VPC에 넣은 상태(단계 3)에서, hostname이 사설 IP로 풀리는지 확인한다. VPN이 연결돼 있고 엔드포인트 DNS가 VPC Route53 Resolver(<code>10.0.0.2</code>)로 지정돼 있어야 한다.
+</p>
+<pre><code>nslookup claude-gw.internal.example.com
+# → 4절에서 넣은 사설 IP(10.0.x.x)가 나와야 정상</code></pre>
+
+<div class="callout">
+<strong>막히면 여기부터.</strong>
+<ul>
+<li><strong>이름이 아예 안 풀림</strong> → 1절의 VPC DNS 속성(<code>enableDnsSupport</code>·<code>enableDnsHostnames</code>)이 둘 다 <code>true</code>인지, zone이 3절대로 해당 VPC에 연결됐는지 확인한다.</li>
+<li><strong>VPN 연결 중인데 안 풀림</strong> → <a href="setup-client-vpn.html">Client VPN 설정</a>에서 엔드포인트 DNS가 <code>10.0.0.2</code>로 지정됐는지 확인한다(가장 자주 누락되는 항목).</li>
+<li><strong>NXDOMAIN이 뜸</strong> → zone은 매칭되는데 레코드가 없을 때 Resolver는 NXDOMAIN을 반환한다. 4절의 <code>claude-gw</code> 레코드가 이 zone에 실제로 있는지, Record name이 <code>claude-gw</code>(부모 도메인을 뺀 부분)로 정확한지 확인한다. 네임스페이스가 겹치는 다른 private zone이 있으면 <strong>가장 구체적인 zone</strong>이 우선하므로, 의도치 않은 겹침이 없는지도 본다.</li>
+</ul>
+</div>
+
+<p class="source">
+출처: <a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/gr-private-hosted-zone-associations.html" target="_blank">Creating private hosted zones (Route 53 Developer Guide)</a>,
+<a href="https://docs.aws.amazon.com/cli/v1/reference/route53/create-hosted-zone.html" target="_blank">create-hosted-zone (AWS CLI Reference)</a>,
+<a href="https://repost.aws/knowledge-center/route-53-fix-dns-resolution-private-zone" target="_blank">Troubleshoot DNS resolution in a private hosted zone (AWS re:Post)</a>
+</p>
+
+<div class="ask-agent">
+Cloud Map(<code>postgres.claude-gw.local</code>) 같은 서비스 디스커버리와 private hosted zone의 관계가 궁금하거나, 여러 서비스에 사설 hostname을 부여하는 구성을 더 자세히 보고 싶으면 요청하세요.
+</div>
+
+<div class="nav-links">
+<span><a href="self-guide-aws.html">&larr; 실습 가이드</a></span>
+<span>Route53 Private Zone 설정</span>
+</div>
+
+</div>
+<script src="assets/nav.js"></script>
+</body>
+</html>

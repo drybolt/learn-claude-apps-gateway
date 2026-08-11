@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>ECS Service Discovery (AWS Cloud Map) — Task IP가 바뀌어도 이름이 따라가는 원리</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<p class="kicker">Self-guide 부록 · 네트워크</p>
+<h1>ECS Service Discovery (AWS Cloud Map) — Task IP가 바뀌어도 이름이 따라가는 원리</h1>
+<p class="subtitle">Fargate Task는 고정 IP를 가질 수 없어, 재배포되면 사설 IP가 바뀐다. Service Discovery는 이 바뀌는 IP를 ECS가 자동으로 DNS에 반영해, hostname이 항상 현재 Task를 가리키게 한다.</p>
+
+<p>
+<a href="setup-route53-private-zone.html">Route53 Private Zone 설정</a>에서는 A 레코드에 gateway Task의 사설 IP를 <strong>손으로</strong> 채웠다. 하지만 <strong>Fargate Task에는 고정 IP·Elastic IP를 붙일 수 없어</strong>(AWS 공식 문서), Task가 재생성되면 ENI가 새로 만들어지며 IP가 바뀐다. 그러면 손으로 채운 A 레코드는 낡은 IP를 가리키게 되어, 재배포 때마다 레코드를 다시 채워야 한다. <strong>ECS Service Discovery</strong>는 이 갱신을 ECS가 대신 하도록 만드는 방법이다.
+</p>
+
+<div class="callout">
+<strong>"IP를 고정"하는 게 아니라 "이름이 현재 IP를 따라가게" 한다.</strong>
+Service Discovery는 Task의 IP를 고정시키지 않는다. 대신 ECS가 Task의 생성·소멸을 AWS Cloud Map에 계속 알려주고, Cloud Map이 그에 맞춰 Route53 private hosted zone의 DNS 레코드를 갱신한다. 클라이언트는 <strong>바뀌지 않는 이름</strong>으로 접근하고, 그 이름이 항상 현재 살아 있는 Task의 사설 IP로 resolve된다.
+</div>
+
+<h2>1 · 구성 요소 — namespace · service · instance</h2>
+<p>
+Service Discovery는 AWS Cloud Map API로 동작하며, 세 계층으로 이루어진다(공식 문서 "Service Discovery concepts"). 아래 다이어그램이 그 포함 관계다.
+</p>
+
+<figure>
+<svg viewBox="0 0 820 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cloud Map 구성 요소 계층: namespace가 service를 담고, service가 instance를 담는다">
+  <defs>
+    <marker id="ah2" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1e1e1e"></path>
+    </marker>
+  </defs>
+  <style>
+    .b   { fill: #fff; stroke: #1e1e1e; stroke-width: 1.5; }
+    .zns { fill: #f3f0ff; stroke: #7048e8; stroke-width: 1.5; }
+    .zsv { fill: #e7f5ff; stroke: #1971c2; stroke-width: 1.5; }
+    .zin { fill: #fff4e6; stroke: #e8590c; stroke-width: 1.5; }
+    .t   { font-family: "Nanum Gothic", sans-serif; font-size: 13px; fill: #1a1a1a; }
+    .tb  { font-family: "Nanum Gothic", sans-serif; font-size: 13px; font-weight: 700; }
+    .e   { font-family: "Nanum Gothic", sans-serif; font-size: 11px; fill: #333; }
+    .ln  { stroke: #1e1e1e; stroke-width: 1.5; fill: none; marker-end: url(#ah2); }
+  </style>
+
+  <!-- namespace -->
+  <rect class="zns" x="20" y="20" width="500" height="390" rx="10"></rect>
+  <text class="tb" x="38" y="45" fill="#7048e8">Service Discovery Namespace</text>
+  <text class="e" x="38" y="63">= 도메인 이름 하나 (예: internal.example.com)</text>
+  <text class="e" x="38" y="79">= 이 실습의 private hosted zone에 대응</text>
+
+  <!-- service -->
+  <rect class="zsv" x="45" y="95" width="450" height="290" rx="9"></rect>
+  <text class="tb" x="63" y="120" fill="#1971c2">Service Discovery Service</text>
+  <text class="e" x="63" y="138">= 서비스 이름 + DNS 설정 (예: claude-gw, A 레코드)</text>
+  <text class="e" x="63" y="154">완성 이름 = claude-gw.internal.example.com</text>
+
+  <!-- service registry -->
+  <rect class="b" x="70" y="172" width="400" height="46" rx="7"></rect>
+  <text class="t" x="270" y="192" text-anchor="middle">Service Registry</text>
+  <text class="e" x="270" y="209" text-anchor="middle">DNS·API로 조회하면 살아 있는 엔드포인트를 돌려준다</text>
+
+  <!-- instances -->
+  <rect class="zin" x="70" y="238" width="400" height="132" rx="8"></rect>
+  <text class="tb" x="88" y="260" fill="#e8590c">Service Discovery Instances</text>
+  <text class="e" x="88" y="277">= 실행 중인 각 Task 하나 = 레코드 하나</text>
+  <rect class="b" x="90" y="292" width="360" height="30" rx="6"></rect>
+  <text class="e" x="270" y="311" text-anchor="middle">Task A · AWS_INSTANCE_IPV4 = 10.0.1.12</text>
+  <rect class="b" x="90" y="330" width="360" height="30" rx="6"></rect>
+  <text class="e" x="270" y="349" text-anchor="middle">Task B · AWS_INSTANCE_IPV4 = 10.0.1.37</text>
+
+  <!-- Route53 자동 생성 -->
+  <rect class="b" x="580" y="150" width="215" height="130" rx="9"></rect>
+  <text class="tb" x="687" y="178" text-anchor="middle">Route53</text>
+  <text class="t" x="687" y="198" text-anchor="middle">Private Hosted Zone</text>
+  <text class="e" x="687" y="220" text-anchor="middle">namespace 생성 시</text>
+  <text class="e" x="687" y="236" text-anchor="middle">자동으로 만들어진다</text>
+  <text class="e" x="687" y="258" text-anchor="middle">instance ↔ A 레코드가</text>
+  <text class="e" x="687" y="274" text-anchor="middle">1:1로 유지된다</text>
+
+  <path class="ln" d="M495,240 C540,240 545,215 578,215"></path>
+  <text class="e" x="500" y="200" text-anchor="start">동기화</text>
+</svg>
+<figcaption>Cloud Map의 세 계층. <strong>namespace</strong>(도메인)가 <strong>service</strong>(서비스 이름 + DNS 설정)를 담고, service의 <strong>registry</strong>에 실행 중인 Task마다 <strong>instance</strong>가 하나씩 등록된다. private DNS namespace를 만들면 대응하는 Route53 private hosted zone이 <strong>자동 생성</strong>되고, instance와 A 레코드가 1:1로 유지된다.</figcaption>
+</figure>
+
+<ul>
+<li><strong>Namespace</strong> — 같은 도메인 이름을 공유하는 service들의 논리적 묶음(예: <code>internal.example.com</code>). <code>aws servicediscovery create-private-dns-namespace</code>로 만들며, <strong>private DNS namespace를 만들면 Route53 private hosted zone이 자동으로 생성</strong>된다.</li>
+<li><strong>Service</strong> — namespace 안에 있고, 서비스 이름과 DNS 설정(레코드 타입·TTL)으로 이루어진다. 그 안의 <strong>Service Registry</strong>를 DNS나 Cloud Map API로 조회하면 접속 가능한 엔드포인트를 돌려준다.</li>
+<li><strong>Instance</strong> — service registry 안의 각 항목으로, service discovery를 켠 <strong>Task 하나에 대응</strong>한다. 각 instance에는 메타데이터가 붙는데, <code>A</code> 레코드용 IPv4 주소는 <strong><code>AWS_INSTANCE_IPV4</code></strong> 속성에 담긴다. Task가 여럿이면 instance도 여럿이고, 조회 시 그 IP들의 집합이 반환된다.</li>
+<li><strong>ECS 헬스 체크</strong> — ECS가 컨테이너 수준 헬스 체크를 주기적으로 수행한다. 헬스 체크를 통과하지 못한 엔드포인트는 <strong>DNS 라우팅에서 제외</strong>되고 unhealthy로 표시된다.</li>
+</ul>
+
+<h2>2 · 동작 흐름 — 등록 · 조회 · 재배포 시 갱신</h2>
+<p>
+핵심은 <strong>ECS 컨트롤 플레인(control plane)이 Task의 생성·소멸을 Cloud Map에 계속 반영</strong>한다는 점이다. 아래 흐름을 따른다(공식 문서 및 AWS 아키텍처 블로그).
+</p>
+
+<figure>
+<svg viewBox="0 0 860 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Task 재배포 시 IP가 바뀌어도 이름이 현재 Task를 가리키는 흐름">
+  <defs>
+    <marker id="ah3" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1e1e1e"></path>
+    </marker>
+    <marker id="ah3r" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c92a2a"></path>
+    </marker>
+  </defs>
+  <style>
+    .bb  { fill: #fff; stroke: #1e1e1e; stroke-width: 1.5; }
+    .bctl{ fill: #e7f5ff; stroke: #1971c2; stroke-width: 1.5; }
+    .bcm { fill: #f3f0ff; stroke: #7048e8; stroke-width: 1.5; }
+    .btk { fill: #fff4e6; stroke: #e8590c; stroke-width: 1.5; }
+    .tt  { font-family: "Nanum Gothic", sans-serif; font-size: 13px; fill: #1a1a1a; }
+    .ttb { font-family: "Nanum Gothic", sans-serif; font-size: 13px; font-weight: 700; }
+    .ee  { font-family: "Nanum Gothic", sans-serif; font-size: 11px; fill: #333; }
+    .lb  { stroke: #1e1e1e; stroke-width: 1.5; fill: none; marker-end: url(#ah3); }
+    .lr  { stroke: #c92a2a; stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; marker-end: url(#ah3r); }
+  </style>
+
+  <!-- 클라이언트 -->
+  <rect class="bb" x="30" y="150" width="160" height="70" rx="8"></rect>
+  <text class="tt" x="110" y="180" text-anchor="middle">클라이언트</text>
+  <text class="ee" x="110" y="200" text-anchor="middle">(VPN으로 들어온 랩탑)</text>
+
+  <!-- ECS control plane -->
+  <rect class="bctl" x="340" y="30" width="200" height="80" rx="8"></rect>
+  <text class="ttb" x="440" y="58" text-anchor="middle" fill="#1971c2">ECS 컨트롤 플레인</text>
+  <text class="ee" x="440" y="78" text-anchor="middle">Task 생성·소멸 감지</text>
+  <text class="ee" x="440" y="94" text-anchor="middle">register / deregister 호출</text>
+
+  <!-- Cloud Map + Route53 -->
+  <rect class="bcm" x="340" y="150" width="200" height="90" rx="8"></rect>
+  <text class="ttb" x="440" y="178" text-anchor="middle" fill="#7048e8">Cloud Map + Route53</text>
+  <text class="ee" x="440" y="198" text-anchor="middle">private hosted zone의</text>
+  <text class="ee" x="440" y="214" text-anchor="middle">A 레코드를 자동 갱신</text>
+  <text class="ee" x="440" y="230" text-anchor="middle">claude-gw.internal.example.com</text>
+
+  <!-- Tasks -->
+  <rect class="btk" x="690" y="40" width="150" height="70" rx="8"></rect>
+  <text class="tt" x="765" y="66" text-anchor="middle">Task A (옛)</text>
+  <text class="ee" x="765" y="86" text-anchor="middle">10.0.1.12</text>
+  <text class="ee" x="765" y="101" text-anchor="middle">종료됨 → 제거</text>
+
+  <rect class="btk" x="690" y="150" width="150" height="70" rx="8"></rect>
+  <text class="tt" x="765" y="176" text-anchor="middle">Task B (새)</text>
+  <text class="ee" x="765" y="196" text-anchor="middle">10.0.1.37</text>
+  <text class="ee" x="765" y="211" text-anchor="middle">시작됨 → 등록</text>
+
+  <!-- edges -->
+  <!-- control plane <- tasks -->
+  <path class="lb" d="M690,75 C610,75 560,72 542,72"></path>
+  <text class="ee" x="560" y="45" text-anchor="start">① Task 시작/종료</text>
+  <path class="lb" d="M690,180 C620,175 560,120 540,105"></path>
+
+  <!-- control plane -> cloud map -->
+  <path class="lb" d="M440,110 L440,148"></path>
+  <text class="ee" x="450" y="134" text-anchor="start">② register/deregister</text>
+
+  <!-- client -> cloud map (DNS query) -->
+  <path class="lb" d="M190,180 L338,190"></path>
+  <text class="ee" x="205" y="172" text-anchor="start">③ DNS 조회 (이름 고정)</text>
+
+  <!-- cloud map -> client (answer) -->
+  <path class="lr" d="M338,210 L192,205"></path>
+  <text class="ee" x="205" y="228" text-anchor="start" fill="#c92a2a">④ 현재 IP 응답 (10.0.1.37)</text>
+
+  <!-- cloud map -> task B -->
+  <path class="lb" d="M540,200 C620,200 660,190 688,188"></path>
+  <text class="ee" x="558" y="255" text-anchor="start">⑤ 클라이언트가 현재 Task로 접속</text>
+</svg>
+<figcaption>재배포로 Task A(<code>10.0.1.12</code>)가 사라지고 Task B(<code>10.0.1.37</code>)가 뜨는 상황. ① ECS 컨트롤 플레인이 Task의 시작·종료를 감지하고 ② Cloud Map에 register/deregister를 호출해 A 레코드를 갱신한다. 클라이언트는 ③ <strong>바뀌지 않는 이름</strong>으로 조회하고 ④ 현재 IP를 응답받아 ⑤ 살아 있는 Task로 접속한다. 이름은 그대로, IP만 따라 바뀐다.</figcaption>
+</figure>
+
+<ol>
+<li><strong>등록(register)</strong> — ECS 서비스가 Task를 시작하면, ECS 컨트롤 플레인이 그 Task의 사설 IP를 Cloud Map service registry에 instance로 등록한다(<code>AWS_INSTANCE_IPV4</code>). Cloud Map은 private hosted zone에 대응하는 A 레코드를 만든다.</li>
+<li><strong>조회(discover)</strong> — 클라이언트는 <code>claude-gw.internal.example.com</code>이라는 <strong>고정된 이름</strong>을 VPC Route53 Resolver(<code>10.0.0.2</code>)로 조회한다. 헬시한 Task IP 집합이 반환된다.</li>
+<li><strong>소멸 시 등록 해제(deregister)</strong> — 새 버전 배포·크래시·재시작으로 Task가 사라지면, ECS 컨트롤 플레인이 등록 해제를 처리하고 Cloud Map은 해당 A 레코드를 삭제한다.</li>
+<li><strong>헬스 반영</strong> — 헬스 체크를 통과하지 못한 엔드포인트는 DNS 응답에서 제외된다. 그래서 조회 결과에는 접속 가능한 Task만 남는다.</li>
+</ol>
+
+<div class="callout">
+<strong>이 실습에서 달라지는 점 — zone을 손으로 만들지 않는다.</strong>
+<a href="setup-route53-private-zone.html">Route53 Private Zone 설정</a> 문서는 private hosted zone을 <strong>수동으로 만들고 A 레코드를 직접 채우는</strong> 방식이다. Service Discovery로 가면, private DNS namespace를 만들 때 <strong>Route53 private hosted zone이 자동 생성</strong>되므로 zone을 손으로 만들지 않는다. 즉 두 방식은 함께 쓰지 않는다 — Service Discovery를 쓰면 namespace(<code>internal.example.com</code>)와 service 이름(<code>claude-gw</code>)만 지정하고, A 레코드 채우기·갱신은 ECS가 자동으로 한다.
+</div>
+
+<h2>3 · 설정 절차 (CLI 개요)</h2>
+<p>
+전체 절차는 <strong>① private DNS namespace 생성 → ② service discovery service 생성 → ③ ECS 서비스에 연결</strong>이다. ①에서 만든 namespace ID를 ②가, ②에서 만든 service ARN을 ③이 참조한다.
+</p>
+<pre><code># ① private DNS namespace 생성 (Route53 private hosted zone이 자동 생성된다)
+aws servicediscovery create-private-dns-namespace \
+  --name internal.example.com \
+  --vpc ${VPC_ID} \
+  --region us-east-1
+# → 반환된 OperationId로 get-operation 하면 namespace ID를 얻는다
+
+# ② service discovery service 생성 (A 레코드, ECS 관리 헬스 체크)
+aws servicediscovery create-service \
+  --name claude-gw \
+  --namespace-id ${NAMESPACE_ID} \
+  --dns-config "NamespaceId=${NAMESPACE_ID},RoutingPolicy=MULTIVALUE,DnsRecords=[{Type=A,TTL=60}]" \
+  --health-check-custom-config FailureThreshold=1 \
+  --region us-east-1
+# → 반환된 Service ARN을 다음 단계에서 쓴다
+
+# ③ ECS 서비스 생성 시 --service-registries로 위 service를 연결
+aws ecs create-service \
+  --cluster &lt;cluster&gt; \
+  --service-name claude-gw \
+  --task-definition &lt;gateway-taskdef&gt; \
+  --desired-count 1 \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[&lt;private-subnet&gt;],securityGroups=[&lt;sg&gt;],assignPublicIp=DISABLED}" \
+  --service-registries "registryArn=${SERVICE_ARN}" \
+  --region us-east-1</code></pre>
+
+<div class="callout">
+<strong>전제·제약 (공식 문서).</strong>
+<ul>
+<li>Fargate는 <strong>플랫폼 버전 1.1.0 이상</strong>에서 service discovery를 지원한다.</li>
+<li>Task는 <code>awsvpc</code>·<code>bridge</code>·<code>host</code> 중 하나의 네트워크 모드여야 한다(<code>none</code> 불가). Fargate는 <code>awsvpc</code>이므로 <code>A</code> 레코드를 만들 수 있다.</li>
+<li><a href="setup-route53-private-zone.html">1절의 VPC DNS 속성</a>(<code>enableDnsSupport</code>·<code>enableDnsHostnames</code>)이 켜져 있어야 resolution이 된다 — 수동 zone 방식과 동일한 요구사항이다.</li>
+<li>service discovery로 만든 Cloud Map 리소스는 <strong>수동으로 정리</strong>해야 한다(서비스 삭제 시 자동 삭제되지 않는다).</li>
+<li>service당 Task는 <strong>최대 1,000개</strong>(Route53 쿼터). 이 실습은 게이트웨이 1개이므로 여유롭다.</li>
+</ul>
+</div>
+
+<h2>4 · resolve 확인</h2>
+<p>
+Client VPN으로 VPC에 들어온 상태(단계 3)에서, 고정된 이름이 현재 Task의 사설 IP로 풀리는지 확인한다. 재배포 뒤 다시 조회하면 IP만 바뀌고 이름은 그대로다.
+</p>
+<pre><code>nslookup claude-gw.internal.example.com
+# → 현재 살아 있는 Task의 사설 IP(10.0.x.x)가 나와야 정상
+#   재배포 후 다시 조회하면 새 Task의 IP로 바뀌어 있다</code></pre>
+
+<p class="source">
+출처: <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-discovery.html" target="_blank">Use service discovery to connect Amazon ECS services with DNS names (Amazon ECS Developer Guide)</a>,
+<a href="https://repost.aws/knowledge-center/ecs-fargate-static-elastic-ip-address" target="_blank">Use a Network Load Balancer with Elastic IP addresses for ECS tasks on Fargate (AWS re:Post)</a>,
+<a href="https://aws.amazon.com/blogs/architecture/new-application-integration-with-aws-cloud-map-for-service-discovery/" target="_blank">Application Integration with AWS Cloud Map for Service Discovery (AWS Architecture Blog)</a>
+</p>
+
+<div class="ask-agent">
+Service Discovery(Cloud Map) 대신 Network Load Balancer + Elastic IP로 진짜 고정 IP를 만드는 구성이나, postgres Task를 위한 <code>postgres.claude-gw.local</code> 같은 별도 namespace 구성이 필요하면 요청하세요.
+</div>
+
+<div class="nav-links">
+<span><a href="setup-route53-private-zone.html">&larr; Route53 Private Zone 설정</a></span>
+<span>Service Discovery</span>
+</div>
+
+</div>
+<script src="assets/nav.js"></script>
+</body>
+</html>

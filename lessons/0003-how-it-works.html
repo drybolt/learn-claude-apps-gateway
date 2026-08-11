@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>3. 작동 방식</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<p class="kicker">Lesson 3 · 작동 방식</p>
+<h1>작동 방식</h1>
+<p class="subtitle">로그인부터 추론 요청, 세션 만료까지의 다섯 단계.</p>
+
+<p>
+Lesson 2에서 <code>gateway.yaml</code>의 각 설정 블록이 맡는 역할을 보았다. 여기서는 그 블록들이 실제 요청 하나를 처리할 때 어떤 순서로 협력하는지를 다섯 단계로 설명한다. 먼저 아래 흐름도로 전체 그림을 훑은 뒤, 이어지는 절에서 각 단계를 하나씩 살펴본다.
+</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 840 800" role="img" aria-label="Claude Apps Gateway 로그인부터 세션 만료까지의 전체 흐름도" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#1e1e1e"></path>
+    </marker>
+  </defs>
+  <style>
+    .box { stroke: #1e1e1e; stroke-width: 1.5; rx: 8; }
+    .flow { fill: #a5d8ff; }
+    .expire { fill: #ffd43b; }
+    .lbl { font-family: "Nanum Gothic", sans-serif; font-size: 15px; fill: #1a1a1a; }
+    .edge { stroke: #1e1e1e; stroke-width: 1.5; fill: none; marker-end: url(#ah); }
+  </style>
+
+  <!-- 1단계: 로그인 (디바이스 인증 플로우) — 박스 3개 -->
+  <rect class="box flow" x="220" y="16" width="400" height="48" rx="8"></rect>
+  <text class="lbl" x="420" y="45" text-anchor="middle">1단계 · CLI에서 /login 실행</text>
+  <rect class="box flow" x="170" y="104" width="500" height="48" rx="8"></rect>
+  <text class="lbl" x="420" y="133" text-anchor="middle">1단계 · 게이트웨이가 사용자 코드·확인 URL 발급</text>
+  <rect class="box flow" x="210" y="192" width="420" height="48" rx="8"></rect>
+  <text class="lbl" x="420" y="221" text-anchor="middle">1단계 · 브라우저에서 회사 IdP 로그인</text>
+  <!-- 2단계: 세션 확립 — 박스 2개 -->
+  <rect class="box flow" x="180" y="280" width="480" height="60" rx="8"></rect>
+  <text class="lbl" x="420" y="304" text-anchor="middle">2단계 · IdP 콜백 → 세션 토큰(JWT) 발급,</text>
+  <text class="lbl" x="420" y="325" text-anchor="middle">Postgres에 상태 기록</text>
+  <rect class="box flow" x="180" y="380" width="480" height="48" rx="8"></rect>
+  <text class="lbl" x="420" y="409" text-anchor="middle">2단계 · CLI가 세션 토큰으로 이후 모든 요청 수행</text>
+  <!-- 3단계: 요청별 정책 적용 -->
+  <rect class="box flow" x="180" y="476" width="480" height="60" rx="8"></rect>
+  <text class="lbl" x="420" y="500" text-anchor="middle">3단계 · 요청마다 정책 적용</text>
+  <text class="lbl" x="420" y="521" text-anchor="middle">그룹 → managed.policies 매칭</text>
+  <!-- 4단계: 추론 요청 전달 -->
+  <rect class="box flow" x="180" y="576" width="480" height="60" rx="8"></rect>
+  <text class="lbl" x="420" y="600" text-anchor="middle">4단계 · 정책 통과 시 추론 요청 전달</text>
+  <text class="lbl" x="420" y="621" text-anchor="middle">upstream 형식으로 번역·라우팅</text>
+  <!-- 5단계: 세션 만료와 재로그인 -->
+  <rect class="box expire" x="170" y="676" width="500" height="60" rx="8"></rect>
+  <text class="lbl" x="420" y="700" text-anchor="middle">5단계 · ttl_hours 경과 → 조용히 갱신(IdP 재확인)</text>
+  <text class="lbl" x="420" y="721" text-anchor="middle">또는 재로그인 요구</text>
+
+  <!-- edges -->
+  <path class="edge" d="M420,64 L420,102"></path>
+  <path class="edge" d="M420,152 L420,190"></path>
+  <path class="edge" d="M420,240 L420,278"></path>
+  <path class="edge" d="M420,340 L420,378"></path>
+  <path class="edge" d="M420,428 L420,474"></path>
+  <path class="edge" d="M420,536 L420,574"></path>
+  <path class="edge" d="M420,636 L420,674"></path>
+</svg>
+<figcaption>로그인부터 세션 만료까지의 전체 흐름. 이어지는 다섯 절에서 각 단계를 하나씩 설명한다. 편집 가능한 원본: <a href="../assets/gateway-flow.excalidraw">gateway-flow.excalidraw</a> (excalidraw.com에서 열기).</figcaption>
+</figure>
+
+<h2>1단계. 로그인 (디바이스 인증 플로우)</h2>
+<p>
+개발자가 터미널에서 <code>/login</code>을 실행하면 CLI는 게이트웨이에 디바이스 인증을 요청하고, 게이트웨이는 짧은 사용자 코드와 확인용 URL을 돌려준다. 개발자가 그 URL을 브라우저에서 열어 확인 페이지에서 사용자 코드를 입력하면, 게이트웨이가 브라우저를 회사 IdP의 로그인 화면으로 리다이렉트하고, 로그인이 끝나면 IdP가 게이트웨이의 <code>/oauth/callback</code>으로 인증 결과를 전달한다. 그동안 CLI는 짧은 간격으로 로그인 완료 여부를 게이트웨이에 물으며 대기한다(polling).
+</p>
+<p>
+이 방식(디바이스 인증 플로우, RFC 8628 device authorization grant)을 쓰는 이유는 터미널과 브라우저가 서로 다른 기기일 수 있기 때문이다. 예를 들어 SSH로 접속한 원격 서버에서 <code>/login</code>을 실행하고, 확인은 자신의 노트북 브라우저에서 하는 구성이 가능하다.
+</p>
+<p>
+개발자가 확인 페이지에서 코드를 제출하면 게이트웨이가 그 코드를 검증한 뒤 브라우저를 IdP로 리다이렉트한다. 이 리다이렉트가 실제로 어떻게 일어나는지(<code>302</code>·<code>Location</code>·<code>redirect_uri</code>), 목적지가 <code>issuer</code> 자체가 아닌 이유, 코드 교환과 PKCE 같은 상세는 <a href="0004-device-auth-flow.html">디바이스 인증 플로우 자세히</a>에서 다룬다.
+</p>
+
+<h2>2단계. 세션 확립</h2>
+<p>
+IdP 로그인이 성공하면 게이트웨이는 사용자의 이메일과 그룹 정보를 받아 PostgreSQL에 로그인 상태를 기록하고, 단기 세션 토큰(JWT)을 발급한다. polling 중이던 CLI는 이 토큰을 받아 대기를 끝낸다. 이 시점 이후로 CLI는 원본 IdP 자격증명이 아니라 이 세션 토큰만으로 게이트웨이와 통신한다.
+</p>
+
+<h2>3단계. 요청별 정책 적용</h2>
+<p>
+CLI가 무언가를 요청할 때마다 세션 토큰이 함께 전송된다. 게이트웨이는 토큰에 담긴 사용자의 IdP 그룹을 <code>managed.policies</code>의 <code>match</code> 조건과 대조해 이 사용자에게 적용할 정책을 결정한다. 이 정책이 모델 allowlist, 툴 권한, 환경변수 등을 정한다. 정책은 매 요청마다 다시 계산되는 것이 아니라 로그인 시점과 이후 1시간 주기의 갱신 시점에 클라이언트로 전달되고, 클라이언트가 그 정책을 따른다.
+</p>
+
+<div class="callout">
+<strong>정책을 담는 두 파일 — <code>managed-settings.json</code> vs <code>remote-settings.json</code>.</strong>
+관리자 정책을 개발자 기기에 전달하는 경로는 두 가지이고, 이름이 비슷하지만 성격이 다르다.
+<br><br>
+<strong><code>managed-settings.json</code> (정적 · 기기 단위)</strong> — 관리자가 MDM(기기 관리 도구)으로 각 기기의 고정 경로(예: Linux <code>/etc/claude-code/managed-settings.json</code>)에 미리 배포하는 파일이다. 게이트웨이 없이도 쓰지만, 정책이 <em>기기</em>에 묶여 그 기기를 누가 쓰든 같은 정책이 적용되고, 바꾸려면 MDM으로 다시 배포해야 한다.
+<br><br>
+<strong><code>remote-settings.json</code> (동적 · 사용자 단위)</strong> — 로그인 시 게이트웨이가 사용자의 IdP 그룹에 맞는 정책을 클라이언트로 내려주면 CLI가 <code>~/.claude/remote-settings.json</code>에 캐시하는 파일이다. 정책이 <em>사용자(그룹)</em>에 묶여, 같은 기기라도 로그인한 사람에 따라 다른 정책이 적용되고, 로그인·갱신 때마다 최신 정책을 다시 받는다. 이 캐시는 사용자 로컬의 <code>~/.claude/settings.json</code>보다 우선 적용되므로 개발자가 관리자 정책을 덮어쓸 수 없다.
+<br><br>
+게이트웨이 방식이 등장한 이유가 바로 이 차이다. 순수 Bedrock 환경에서는 <code>managed-settings.json</code>의 기기 단위 정적 배포만 가능했는데, 게이트웨이는 이를 사용자 단위 동적 전달로 확장한다. 관리자가 <code>gateway.yaml</code>의 <code>managed</code> 블록에 그룹별 정책을 어떻게 적는지는 <a href="0002-components.html">gateway.yaml 설정 구조</a>의 선택 블록 절에서 다룬다.
+</div>
+
+<h2>4단계. 추론 요청 전달</h2>
+<p>
+개발자가 실제로 Claude에게 질문하면 CLI는 항상 동일한 Anthropic Messages API 형식으로 게이트웨이에 요청을 보낸다. 게이트웨이는 이 요청이 정책상 허용된 모델인지 먼저 검사하고, 허용되지 않으면 400 응답을 돌려준다. 통과하면 <code>upstreams</code>에 등록된 대상에 맞는 형식으로 번역해 전달하고, 응답이 오면 다시 CLI가 이해하는 형식으로 돌려준다. 이 과정에서 CLI는 요청이 어느 업스트림으로 갔는지 알 필요가 없으며, 번역과 라우팅은 전부 게이트웨이가 대신한다.
+</p>
+
+<h2>5단계. 세션 만료와 재로그인</h2>
+<p>
+세션 토큰은 <code>ttl_hours</code>가 지나면 만료된다. 만료되기 전에 CLI가 조용히 토큰 갱신을 시도하는데, 이때 게이트웨이는 IdP에 사용자가 여전히 유효한지 재확인한다. IdP에서 계정이 비활성화되었다면 이 갱신이 실패하고, 개발자는 다시 브라우저 로그인을 해야 한다. 결과적으로 권한 회수는 IdP에서 계정을 끄는 것만으로 이루어지고, 게이트웨이가 그것을 다음 갱신 시점에 자동으로 반영한다.
+</p>
+
+<h2>확인 퀴즈</h2>
+<div class="quiz">
+<p class="q">IdP 계정 비활성화 후 게이트웨이 접근이 끊기는 시점은?</p>
+<label><input type="radio" name="q1" value="a"> 즉시</label>
+<label><input type="radio" name="q1" value="b" data-correct> 다음 세션 토큰 갱신 시도가 실패하는 시점</label>
+<label><input type="radio" name="q1" value="c"> PostgreSQL이 재시작되는 시점</label>
+<div class="feedback" data-correct-text="정답입니다. 갱신 시점에 IdP를 재확인하므로 그때 비활성화가 반영됩니다." data-incorrect-text="5단계 '세션 만료와 재로그인'을 다시 확인하세요."></div>
+</div>
+
+<p class="source">
+출처: <a href="https://code.claude.com/docs/en/claude-apps-gateway" target="_blank">Claude apps gateway (공식 문서)</a>,
+<a href="https://code.claude.com/docs/en/claude-apps-gateway-deploy" target="_blank">Claude apps gateway deployment and operations (공식 문서)</a>
+</p>
+
+<div class="ask-agent">
+디바이스 인증 플로우의 보안 특성이나 managed.policies 매칭 우선순위 같은 심화 주제는 요청하시면 별도로 정리하겠습니다.
+</div>
+
+<div class="nav-links">
+<span><a href="0002-components.html">&larr; 이전</a></span>
+<span><a href="0004-device-auth-flow.html">다음: 디바이스 인증 &rarr;</a></span>
+</div>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

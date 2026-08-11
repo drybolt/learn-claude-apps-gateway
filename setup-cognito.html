@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Cognito 설정 — User Pool · App Client · 테스트 사용자</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<p class="kicker">Self-guide 부록 · OIDC IdP</p>
+<h1>Cognito 설정 — User Pool · App Client · 테스트 사용자</h1>
+<p class="subtitle">게이트웨이가 로그인을 위임할 OIDC IdP를 최신 Cognito 콘솔로 준비한다.</p>
+
+<p>
+<a href="self-guide-aws.html">실습 가이드</a>의 단계 1에서 참조하는 문서다. Claude Apps Gateway는 로그인 전체를 IdP에 위임하므로(SAML·LDAP 미지원, OIDC 전용), IdP 없이는 어떤 테스트도 시작할 수 없다. 이 문서는 <strong>애플리케이션 생성 → 생성 후 설정 → 테스트 사용자 → 값 메모</strong>를 순서대로 다룬다.
+</p>
+
+<div class="callout">
+<strong>최신 콘솔은 "애플리케이션 중심" 흐름이라 User Pool 이름을 먼저 입력하지 않는다.</strong>
+예전 콘솔은 User Pool을 먼저 이름 붙여 만들었지만, 최신 콘솔은 애플리케이션 정보만 입력하면 <strong>User Pool과 App Client가 함께 자동 생성</strong>된다. 그래서 시작 화면에 풀 이름 입력란이 없는 것이 정상이다. 풀 이름은 생성 후 개요(overview) 화면에서 바꾼다.
+</div>
+
+<h2>1 · 애플리케이션 생성 (User Pool·App Client 자동 생성)</h2>
+<p>
+Cognito 콘솔(us-east-1)의 <strong>User pools</strong> 메뉴에서 <strong>Create user pool</strong>을 눌러 시작한다. 이 시작 화면에서 입력하는 값은 다음이 전부이며, "Create your application"을 누르면 Cognito가 User Pool과 App Client를 기본 설정으로 함께 만든다.
+</p>
+<ol>
+<li><strong>Define your application</strong> — Application type으로 <strong>Traditional web application</strong>을 고른다.</li>
+<li><strong>Name your application</strong> — 애플리케이션(App Client) 이름을 입력한다. 예: <code>claude-gw-app</code>.</li>
+<li><strong>Configure options</strong>
+<ul>
+<li><strong>Options for sign-in identifiers = Email</strong></li>
+<li><strong>Required attributes for sign-up = <code>email</code></strong></li>
+</ul>
+</li>
+<li><strong>Add a return URL</strong> — <code>https://&lt;gateway-hostname&gt;/oauth/callback</code>(단계 0의 hostname). 이 값이 App Client의 콜백 URL이 된다.</li>
+<li><strong>Create your application</strong>을 누른다.</li>
+</ol>
+
+<div class="callout">
+<strong>왜 Traditional web application인가.</strong>
+게이트웨이는 <code>client_secret</code>을 쓰는 <strong>confidential 클라이언트</strong>다. client secret은 서버가 안전하게 보관할 수 있을 때만 의미가 있는데, Cognito의 애플리케이션 유형 중 secret을 기본 포함하는 것이 Traditional web application(서버 사이드 웹앱)이다. Single-page application·Mobile app은 브라우저·기기에서 도는 public 클라이언트라 secret을 쓰지 않으므로 게이트웨이 설정과 맞지 않는다. 공식 문서 기준으로, 나중에 secret 유무를 바꾸려면 새 App Client를 Traditional web application 또는 Machine-to-machine 유형으로 다시 만들어야 한다.
+</div>
+
+<div class="callout">
+<strong>생성 후 되돌릴 수 없는 선택이 있다.</strong>
+<strong>사인인 식별자(Email)</strong>와 <strong>필수 속성</strong>은 User Pool 생성 후 변경할 수 없다. 바꾸려면 새 User Pool을 만들어 사용자를 이전해야 하므로, "Configure options" 단계에서 정확히 정한다.
+</div>
+
+<h2>2 · 생성 후 설정 (개요 화면)</h2>
+<p>
+애플리케이션이 만들어지면 User Pool 개요 화면에서 다음을 마저 설정한다. 여기서부터는 생성 후에도 바꿀 수 있는 값이다.
+</p>
+<ol>
+<li><strong>User Pool 이름 변경(선택)</strong> — 자동 생성된 기본 이름을 <code>claude-gw-pool</code> 등으로 바꾼다. 실습 식별을 쉽게 하기 위한 것이며 동작에는 영향이 없다.</li>
+<li><strong>이메일 자동 검증 활성화</strong> — 가입 시 이메일을 검증하게 해 사용자의 <code>email_verified</code>가 <code>true</code>가 되도록 한다. 게이트웨이는 이 값이 <code>true</code>가 아닌 사용자를 거부한다.</li>
+<li><strong>MFA = No MFA</strong> — 테스트 구성이므로 다단계 인증은 끈다. (운영 전환 시 켜는 것을 검토한다.)</li>
+<li><strong>Hosted UI(managed login) 도메인 생성</strong> — Cognito 도메인 방식으로 로그인 페이지 도메인을 만든다. 예: 도메인 접두어 <code>claude-gw-auth</code> → <code>https://claude-gw-auth.auth.us-east-1.amazoncognito.com</code>. 사용자가 실제로 아이디·비밀번호를 입력하는 OIDC 로그인 페이지가 이 도메인에서 열린다. 접두어는 리전 안에서 유일해야 하므로 이미 쓰이는 이름이면 다른 이름을 쓴다.</li>
+<li><strong>App Client 확인</strong> — Traditional web application이면 <strong>client secret이 이미 생성</strong>돼 있다. App Client 상세에서 콜백 URL이 <code>https://&lt;gateway-hostname&gt;/oauth/callback</code>인지도 확인한다.</li>
+</ol>
+
+<div class="callout">
+<strong>Cognito는 공개 엔드포인트라 브라우저 도달 문제가 없다.</strong>
+사설 IP resolution 제약은 <em>게이트웨이 자신</em>에만 적용되고 IdP에는 적용되지 않는다. Cognito 로그인 페이지는 공개 인터넷에서 열리므로, 랩탑 브라우저가 Cognito에 닿는 것은 문제가 아니다. 게이트웨이(사설 IP)에 닿는 경로만 <a href="setup-client-vpn.html">Client VPN</a>으로 마련하면 된다.
+</div>
+
+<h2>3 · 테스트 사용자 생성</h2>
+<p>
+개요 화면의 <strong>Users</strong>에서 테스트 사용자 1명을 만든다. 이때 <strong>email 검증 상태</strong>로 만들어야 한다 — <code>email_verified: true</code>가 아니면 게이트웨이가 로그인을 거부한다. 콘솔에서 사용자를 만든 뒤 속성에서 <code>email_verified</code>를 <code>true</code>로 표시하거나, 2단계의 이메일 자동 검증 흐름으로 검증을 마친다.
+</p>
+
+<h2>4 · 게이트웨이에 넘길 값 메모</h2>
+<p>
+<code>gateway.yaml</code>의 <code>oidc</code> 블록(<a href="self-guide-aws.html">실습 가이드</a> 단계 4)에 넣을 값이다. 세 값을 메모해 둔다.
+</p>
+<ul>
+<li><code>issuer</code> — <code>https://cognito-idp.us-east-1.amazonaws.com/&lt;pool-id&gt;</code></li>
+<li><code>client_id</code> — App Client의 ID</li>
+<li><code>client_secret</code> — App Client의 secret (환경변수 <code>OIDC_CLIENT_SECRET</code>로 주입)</li>
+</ul>
+
+<div class="callout">
+<strong>막히면 여기부터.</strong>
+<ul>
+<li><strong>로그인은 됐는데 게이트웨이가 사용자를 거부</strong> → 테스트 사용자의 <code>email_verified</code>가 <code>true</code>인지 확인한다.</li>
+<li><strong>게이트웨이가 client secret 관련 오류</strong> → App Client가 Traditional web application(secret 포함) 유형인지, <code>OIDC_CLIENT_SECRET</code>이 실제 secret과 일치하는지 확인한다.</li>
+<li><strong>콜백 오류(redirect mismatch)</strong> → App Client의 콜백 URL이 <code>https://&lt;gateway-hostname&gt;/oauth/callback</code>과 정확히 일치하는지 확인한다.</li>
+</ul>
+</div>
+
+<p class="source">
+출처: <a href="https://docs.aws.amazon.com/cognito/latest/developerguide/getting-started-user-pools-application.html" target="_blank">Create a new application in the Amazon Cognito console (공식 문서)</a>,
+<a href="https://docs.aws.amazon.com/help-panel/cognito/latest/console/hp-cognito-user-pool-sign-in-options.html" target="_blank">Cognito user pool sign-in options (공식 문서)</a>
+</p>
+
+<div class="ask-agent">
+Cognito 외 다른 OIDC IdP(Auth0·Okta·Entra ID 등)로 게이트웨이를 연결하는 방법이 필요하면 요청하세요.
+</div>
+
+<div class="nav-links">
+<span><a href="self-guide-aws.html">&larr; 실습 가이드</a></span>
+<span>Cognito 설정</span>
+</div>
+
+</div>
+<script src="assets/nav.js"></script>
+</body>
+</html>

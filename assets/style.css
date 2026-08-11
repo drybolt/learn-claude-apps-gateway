@@ -1,0 +1,342 @@
+/* Shared stylesheet for Claude Apps Gateway lessons — Tufte-inspired, print-friendly */
+@import url('https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700;800&display=swap');
+
+:root {
+  --ink: #1a1a1a;
+  --muted: #5a5a5a;
+  --line: #d8d4cc;
+  --bg: #fdfcf9;
+  --accent: #8a4b2e;
+  --accent-bg: #f4ece3;
+  --code-bg: #f2f0ea;
+  --good: #2e6b47;
+  --bad: #a03b2e;
+  --serif: "Nanum Gothic", "Apple SD Gothic Neo", sans-serif;
+  --mono: "D2Coding", "SF Mono", "Menlo", "Consolas", monospace;
+  --measure: 700px;
+}
+
+* { box-sizing: border-box; }
+
+html { font-size: 15px; }
+
+body {
+  font-family: var(--serif);
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.6;
+  margin: 0;
+  padding: 3rem 1.5rem 6rem;
+}
+
+.page {
+  max-width: var(--measure);
+  margin: 0 auto;
+}
+
+.kicker {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 0.5rem;
+}
+
+h1 {
+  font-size: 2rem;
+  line-height: 1.2;
+  margin: 0 0 0.3rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+  margin: 2.2rem 0 0.8rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.3rem;
+}
+
+h3 {
+  font-size: 1.05rem;
+  margin: 1.4rem 0 0.5rem;
+}
+
+p, li { font-size: 1.05rem; }
+
+.subtitle {
+  color: var(--muted);
+  font-size: 1.05rem;
+  margin: 0 0 2rem;
+}
+
+.callout {
+  background: var(--accent-bg);
+  border-left: 3px solid var(--accent);
+  padding: 0.8rem 1.1rem;
+  margin: 1.2rem 0;
+  font-size: 0.98rem;
+}
+
+.callout.good { border-left-color: var(--good); background: #eaf3ee; }
+.callout.bad { border-left-color: var(--bad); background: #f7eae7; }
+
+code, pre {
+  font-family: var(--mono);
+  font-size: 0.88rem;
+}
+
+pre {
+  background: var(--code-bg);
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  border-radius: 4px;
+  line-height: 1.5;
+}
+
+code {
+  background: var(--code-bg);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+}
+
+pre code { background: none; padding: 0; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.95rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+
+th { font-family: var(--mono); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+
+.source {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.source a { color: var(--accent); }
+
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-bg); }
+a:hover { border-bottom-color: var(--accent); }
+
+.nav-links {
+  margin-top: 3rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+}
+
+.ask-agent {
+  margin-top: 2rem;
+  padding: 1rem 1.1rem;
+  background: #eef1f4;
+  border-radius: 4px;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+/* Left navigation pane (assets/nav.js가 생성) */
+.layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 2.5rem;
+  max-width: calc(var(--measure) + 320px);
+  margin: 0 auto;
+}
+
+.layout > .page {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.site-nav {
+  flex: 0 0 240px;
+  position: sticky;
+  top: 3rem;
+  align-self: flex-start;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  max-height: calc(100vh - 4rem);
+  overflow-y: auto;
+}
+
+.site-nav-toggle {
+  display: none;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.site-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding-right: 0.5rem;
+  border-right: 1px solid var(--line);
+}
+
+.site-nav-group {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.site-nav-group:first-child { margin-top: 0; }
+
+.site-nav-link {
+  display: block;
+  padding: 0.32rem 0.6rem;
+  border-radius: 4px;
+  color: var(--muted);
+  border: 1px solid transparent;
+  line-height: 1.35;
+}
+
+a.site-nav-link:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.site-nav-link.current {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: bold;
+}
+
+/* 좁은 화면: pane을 상단으로 접고 토글로 여닫는다 */
+@media (max-width: 900px) {
+  .layout {
+    display: block;
+    max-width: var(--measure);
+  }
+  .site-nav {
+    position: static;
+    flex-basis: auto;
+    max-height: none;
+    margin-bottom: 1.8rem;
+  }
+  .site-nav-toggle { display: block; }
+  .site-nav-list {
+    display: none;
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+  }
+  .site-nav.open .site-nav-list { display: flex; }
+}
+
+/* Top lesson index (구버전 인라인 nav — 남아 있으면 숨긴다) */
+.lesson-index { display: none; }
+
+.lesson-index.legacy-visible {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 1.8rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+
+.lesson-index a,
+.lesson-index span {
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.lesson-index a { border-bottom: 1px solid var(--line); }
+.lesson-index a:hover { border-color: var(--accent); color: var(--accent); }
+
+.lesson-index .current {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: bold;
+}
+
+/* Diagram figure */
+.diagram {
+  margin: 1.4rem 0;
+  text-align: center;
+}
+
+.diagram svg {
+  width: 100%;
+  max-width: 620px;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  padding: 0.5rem;
+}
+
+.diagram figcaption {
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Quiz widget */
+.quiz {
+  margin: 1.4rem 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.quiz .q { font-weight: bold; margin-bottom: 0.6rem; }
+
+.quiz label {
+  display: block;
+  padding: 0.4rem 0.6rem;
+  margin: 0.3rem 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.quiz label:hover { background: var(--accent-bg); }
+
+.quiz input[type="radio"] { margin-right: 0.5rem; }
+
+.quiz .feedback {
+  display: none;
+  margin-top: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 4px;
+  font-size: 0.92rem;
+}
+
+.quiz .feedback.show { display: block; }
+.quiz .feedback.correct { background: #eaf3ee; color: var(--good); }
+.quiz .feedback.incorrect { background: #f7eae7; color: var(--bad); }
+
+@media print {
+  body { padding: 0; }
+  .ask-agent { display: none; }
+}

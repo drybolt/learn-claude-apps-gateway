@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>이미지 준비 — gateway · postgres</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<p class="kicker">Self-guide 부록 · 컨테이너 이미지</p>
+<h1>이미지 준비 — gateway · postgres</h1>
+<p class="subtitle">실습 가이드 단계 5에서 배포할 두 컨테이너 이미지를 준비한다.</p>
+
+<p>
+<a href="self-guide-aws.html">실습 가이드</a>의 단계 5는 gateway와 postgres를 별도 ECS Task로 띄운다. 두 이미지는 성격이 전혀 달라, 하나는 직접 빌드해야 하고 하나는 공개 이미지를 그대로 쓴다. 이 문서는 그 준비 과정만 따로 다룬다.
+</p>
+
+<table>
+<tr><th>이미지</th><th>출처</th><th>빌드 필요?</th><th>ECR push</th></tr>
+<tr><td>gateway</td><td>직접 빌드 (claude 바이너리)</td><td>예</td><td>필수</td></tr>
+<tr><td>postgres</td><td>공개 <code>postgres:16</code></td><td>아니오</td><td>선택(미러링 권장)</td></tr>
+</table>
+
+<h2>gateway 이미지 — 직접 빌드</h2>
+<p>
+Anthropic은 게이트웨이용 컨테이너 이미지를 공개 배포하지 않는다. 게이트웨이 기능은 <code>claude</code> 바이너리에 내장돼 있으므로, 그 <strong>네이티브 바이너리를 담은 이미지를 직접 만들어야</strong> 한다.
+</p>
+
+<h3>1. 네이티브 claude 바이너리 확보</h3>
+<p>
+<strong>v2.1.195 이상</strong>의 네이티브 바이너리가 필요하다. 게이트웨이 서버 모드(<code>claude gateway</code>)는 네이티브 바이너리에서만 동작하며, npm/Node.js 설치본으로는 서버가 뜨지 않는다. 빌드 컨텍스트(Dockerfile과 같은 디렉터리)에 이 바이너리를 <code>claude</code>라는 이름으로 둔다.
+</p>
+
+<h3>2. Dockerfile 작성</h3>
+<p>
+AWS 블로그 예시를 따른다. 경량 베이스에 바이너리를 복사하고, <strong>gateway.yaml과 TLS 인증서를 이미지에 함께 굽는다</strong>(테스트 방식 — 아래 callout 참고). <code>ENTRYPOINT</code>는 게이트웨이 서버로 지정한다.
+</p>
+<pre><code>FROM debian:12-slim                          # glibc 기반 경량 베이스
+RUN useradd -m -u 10001 gateway || true
+COPY claude /usr/local/bin/claude            # 네이티브 claude 바이너리 복사
+RUN chmod +x /usr/local/bin/claude
+
+# --- 테스트 방식: 설정·인증서를 이미지에 굽는다 ---
+COPY gateway.yaml /etc/claude/gateway.yaml   # 단계 4에서 작성한 설정
+COPY tls/cert.pem /etc/claude/tls/cert.pem   # 자체 서명 인증서
+COPY tls/key.pem  /etc/claude/tls/key.pem
+
+ENV CLAUDE_CONFIG_DIR=/tmp/.claude
+ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1   # Anthropic으로의 비필수 트래픽 차단
+EXPOSE 8080
+ENTRYPOINT ["claude", "gateway", "--config", "/etc/claude/gateway.yaml"]</code></pre>
+
+<div class="callout">
+<strong>이 테스트는 설정·인증서를 이미지에 굽는다 — 편의를 위한 선택이다.</strong>
+<code>gateway.yaml</code>과 TLS 인증서를 <code>COPY</code>로 이미지에 포함하면 별도 볼륨·시크릿 마운트가 필요 없어 가장 단순하다. 단, <strong>비밀값(<code>OIDC_CLIENT_SECRET</code> 등)은 이미지에 굽지 않는다</strong> — <code>gateway.yaml</code>이 <code>${ENV_VAR}</code>로 참조하고, 실제 값은 ECS Task Definition의 환경변수(또는 Secrets Manager)로 <strong>런타임에 주입</strong>한다. 자체 서명 인증서와 설정이 이미지에 남는 것은 테스트라 용인하지만, 운영에서는 인증서를 Secrets Manager에서 마운트하고 설정도 이미지 밖에서 주입하는 방식으로 전환한다.
+</div>
+
+<h3>3. 자체 서명 TLS 인증서 생성</h3>
+<p>
+게이트웨이 hostname(단계 0에서 정한 이름)에 대한 자체 서명 인증서를 만들어 빌드 컨텍스트의 <code>tls/</code>에 둔다.
+</p>
+<pre><code>mkdir -p tls
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+  -keyout tls/key.pem -out tls/cert.pem \
+  -subj "/CN=&lt;gateway-hostname&gt;" \
+  -addext "subjectAltName=DNS:&lt;gateway-hostname&gt;"</code></pre>
+<p>
+자체 서명이라 클라이언트가 신뢰하지 않을 수 있다. 랩탑에서 이 인증서를 신뢰 저장소에 추가하거나, 테스트 목적이면 신뢰 경고를 수동으로 통과한다. (공인 인증서가 필요하면 실습 가이드의 "정석 구성으로 전환" — ALB + ACM으로 넘어간다.)
+</p>
+
+<h3>4. ECR에 push</h3>
+<p>
+Fargate가 pull할 수 있도록 ECR 리포지토리에 올린다.
+</p>
+<pre><code>aws ecr create-repository --repository-name claude-gateway --region us-east-1
+
+aws ecr get-login-password --region us-east-1 \
+  | docker login --username AWS --password-stdin &lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com
+
+docker build -t claude-gateway:test .
+docker tag  claude-gateway:test &lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com/claude-gateway:test
+docker push &lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com/claude-gateway:test</code></pre>
+<p>
+이 이미지 URI를 단계 5의 gateway Task Definition에 지정한다.
+</p>
+
+<h2>postgres 이미지 — 공개 이미지 그대로</h2>
+<p>
+직접 만들 것이 없다. Docker Hub 공식 <code>postgres:16</code>을 ECS Task Definition의 이미지로 지정하고, 초기화 값은 환경변수로 준다.
+</p>
+<ul>
+<li><code>POSTGRES_USER</code>·<code>POSTGRES_PASSWORD</code>·<code>POSTGRES_DB</code> — 이 값들이 gateway의 <code>GATEWAY_POSTGRES_URL</code>(<code>postgres://user:pass@postgres.claude-gw.local:5432/db</code>)과 정확히 일치해야 한다.</li>
+<li>PostgreSQL <strong>14 이상</strong>이면 된다(게이트웨이 요건). <code>postgres:16</code>은 이를 충족한다.</li>
+</ul>
+
+<div class="callout">
+<strong>Docker Hub rate limit에 걸릴 수 있다.</strong>
+Fargate가 Docker Hub에서 직접 pull하면 익명 pull rate limit에 걸릴 수 있다. 안정성을 원하면 <code>postgres:16</code>을 ECR로 한 번 미러링(pull → tag → push)해 두고 그 ECR URI를 쓴다. 테스트에서 한두 번 띄우는 정도면 Docker Hub 직접 pull로도 대개 문제없다.
+</div>
+
+<p class="source">
+출처: <a href="https://aws.amazon.com/ko/blogs/tech/claude-apps-gateway-with-aws/" target="_blank">Claude Apps Gateway on AWS 자세히 알아보기 (AWS 기술 블로그)</a>,
+<a href="https://code.claude.com/docs/en/claude-apps-gateway" target="_blank">Claude apps gateway (공식 문서)</a>
+</p>
+
+<div class="ask-agent">
+gateway.yaml·인증서를 이미지에 굽지 않고 Secrets Manager로 주입하는 운영 방식이 필요하면 요청하세요.
+</div>
+
+<div class="nav-links">
+<span><a href="self-guide-aws.html">&larr; 실습 가이드</a></span>
+<span>이미지 준비</span>
+</div>
+
+</div>
+<script src="assets/nav.js"></script>
+</body>
+</html>

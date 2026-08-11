@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Self-guide — Claude Apps Gateway on AWS</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<p class="kicker">Self-guide · 실습</p>
+<h1>Self-guide — Claude Apps Gateway on AWS</h1>
+<p class="subtitle">us-east-1 · 단일 AZ · Cognito IdP · Client VPN · 개발자 랩탑에서 직접 로그인 흐름을 확인하는 최소 구성.</p>
+
+<p>
+이 가이드는 Claude Apps Gateway가 실제로 동작하는지 <strong>가장 빠르게 확인</strong>하는 것을 목표로 한다. 운영용 정석 구성(RDS·ALB·다중 AZ) 대신, 로그인과 추론이 끝까지 되는 것만 보기 위해 최소한으로 줄였다. 클라이언트는 개발자 랩탑 하나이며, Client VPN으로 VPC에 진입해 게이트웨이에 접속한다. 정석 구성으로 넘어가는 지점은 각 단계에서 따로 표시한다.
+</p>
+
+<div class="callout">
+<strong>이 구성은 테스트 전용이다.</strong>
+PostgreSQL을 관리형 RDS 대신 <strong>별도 Fargate 컨테이너</strong>로 두고, TLS는 게이트웨이 자체 listener(<code>listen.tls</code>)로 자체 서명 인증서를 종단한다. 이 두 선택은 각각 RDS(2 AZ 필수)와 ALB(2 AZ 필수)의 이중화 요건을 피하기 위한 것이다. 공인 인증서나 관리형 DB의 백업·가용성이 필요해지면 정석 구성으로 전환해야 한다.
+</div>
+
+<h2>목표 구성</h2>
+<figure class="diagram">
+<svg viewBox="0 0 1080 680" role="img" aria-label="Claude Apps Gateway 테스트 구성 아키텍처 (랩탑 클라이언트 + Client VPN)" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#1e1e1e"></path>
+    </marker>
+    <marker id="ahp" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#9c36b5"></path>
+    </marker>
+  </defs>
+  <style>
+    .box { stroke-width: 2; }
+    .b-cli { fill: #a5d8ff; stroke: #1971c2; }
+    .b-idp { fill: #ffec99; stroke: #e8590c; }
+    .b-net { fill: #eebefa; stroke: #9c36b5; }
+    .b-db  { fill: #b2f2bb; stroke: #2f9e44; }
+    .b-up  { fill: #ffd8a8; stroke: #e8590c; }
+    .b-gw  { fill: #a5d8ff; stroke: #1971c2; }
+    .zone  { fill: none; stroke-width: 1.5; stroke-dasharray: 6 4; }
+    .z-vpc { stroke: #2f9e44; }
+    .z-pub { stroke: #1971c2; }
+    .z-priv{ stroke: #364fc7; }
+    .z-task{ fill: #fff4e6; stroke: #e8590c; stroke-width: 1.5; stroke-dasharray: none; }
+    .lbl   { font-family: "Nanum Gothic", sans-serif; font-size: 13px; fill: #1a1a1a; }
+    .zlbl  { font-family: "Nanum Gothic", sans-serif; font-size: 13px; font-weight: 700; }
+    .elbl  { font-family: "Nanum Gothic", sans-serif; font-size: 11px; fill: #333; }
+    .edge  { stroke: #1e1e1e; stroke-width: 1.5; fill: none; marker-end: url(#ah); }
+    .edge-out { stroke: #9c36b5; stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; marker-end: url(#ahp); }
+  </style>
+
+  <!-- 외부 주체: 랩탑 = CLI + 브라우저 -->
+  <rect class="box b-cli" x="30" y="100" width="185" height="90" rx="8"></rect>
+  <text class="lbl" x="122" y="128" text-anchor="middle">개발자 랩탑 (VPC 밖)</text>
+  <text class="elbl" x="122" y="148" text-anchor="middle">Claude Code CLI v2.1.195+</text>
+  <text class="elbl" x="122" y="165" text-anchor="middle">+ 브라우저</text>
+
+  <rect class="box b-idp" x="30" y="310" width="185" height="75" rx="8"></rect>
+  <text class="lbl" x="122" y="340" text-anchor="middle">Amazon Cognito</text>
+  <text class="elbl" x="122" y="360" text-anchor="middle">OIDC IdP · 공개 엔드포인트</text>
+
+  <!-- VPC -->
+  <rect class="zone z-vpc" x="330" y="60" width="750" height="600" rx="10"></rect>
+  <text class="zlbl z-vpc" x="348" y="84" fill="#2f9e44">VPC (us-east-1, 단일 AZ)</text>
+
+  <!-- Public Subnet: NAT만 -->
+  <rect class="zone z-pub" x="355" y="105" width="200" height="515" rx="8"></rect>
+  <text class="zlbl z-pub" x="370" y="127" fill="#1971c2">Public Subnet</text>
+  <rect class="box b-net" x="378" y="360" width="155" height="60" rx="8"></rect>
+  <text class="lbl" x="455" y="395" text-anchor="middle">NAT Gateway</text>
+
+  <!-- Private Subnet -->
+  <rect class="zone z-priv" x="575" y="105" width="485" height="515" rx="8"></rect>
+  <text class="zlbl z-priv" x="590" y="127" fill="#364fc7">Private Subnet</text>
+
+  <!-- Client VPN ENI -->
+  <rect class="box b-net" x="598" y="150" width="440" height="55" rx="8"></rect>
+  <text class="lbl" x="818" y="172" text-anchor="middle">Client VPN ENI</text>
+  <text class="elbl" x="818" y="191" text-anchor="middle">엔드포인트가 이 서브넷에 연결 · 랩탑을 VPC로</text>
+
+  <!-- Gateway Task (별도) -->
+  <rect class="z-task" x="598" y="228" width="440" height="92" rx="8"></rect>
+  <text class="zlbl" x="613" y="248" fill="#e8590c">ECS Fargate Task — gateway</text>
+  <rect class="box b-gw" x="620" y="256" width="396" height="56" rx="8"></rect>
+  <text class="lbl" x="818" y="278" text-anchor="middle">claude gateway :8080 (native)</text>
+  <text class="elbl" x="818" y="296" text-anchor="middle">listen.tls로 HTTPS 직접 종단</text>
+
+  <!-- Postgres Task (별도) -->
+  <rect class="z-task" x="598" y="340" width="440" height="86" rx="8"></rect>
+  <text class="zlbl" x="613" y="360" fill="#e8590c">ECS Fargate Task — postgres</text>
+  <rect class="box b-db" x="620" y="368" width="396" height="50" rx="8"></rect>
+  <text class="lbl" x="818" y="389" text-anchor="middle">postgres:16 · RDS 대체</text>
+  <text class="elbl" x="818" y="406" text-anchor="middle">Cloud Map DNS로 접근</text>
+
+  <!-- Bedrock -->
+  <rect class="box b-up" x="660" y="548" width="230" height="64" rx="8"></rect>
+  <text class="lbl" x="775" y="575" text-anchor="middle">Amazon Bedrock</text>
+  <text class="elbl" x="775" y="594" text-anchor="middle">모델 액세스 활성화</text>
+
+  <!-- edges -->
+  <!-- ① 랩탑 → Client VPN ENI -->
+  <path class="edge" d="M215,135 C400,90 520,120 596,172"></path>
+  <text class="elbl" x="260" y="102" text-anchor="start">① Client VPN 터널 (mutual TLS)</text>
+  <!-- ② Client VPN ENI → gateway (CLI + 브라우저) -->
+  <path class="edge" d="M818,205 L818,254"></path>
+  <text class="elbl" x="828" y="228" text-anchor="start">② CLI /login·추론 + 브라우저 확인·콜백</text>
+  <!-- 랩탑 → Cognito -->
+  <path class="edge" d="M122,190 L122,308"></path>
+  <text class="elbl" x="130" y="252" text-anchor="start">SSO 로그인</text>
+  <!-- gateway → postgres -->
+  <path class="edge" d="M818,320 L818,366"></path>
+  <text class="elbl" x="828" y="346" text-anchor="start">세션·상태 저장</text>
+  <!-- gateway → Bedrock -->
+  <path class="edge" d="M700,312 C640,420 690,505 760,546"></path>
+  <text class="elbl" x="628" y="450" text-anchor="middle">업스트림 호출</text>
+  <text class="elbl" x="628" y="465" text-anchor="middle">(Task Role)</text>
+  <!-- gateway → NAT → Cognito (아웃바운드) -->
+  <path class="edge-out" d="M620,300 C560,340 500,360 535,360"></path>
+  <text class="elbl" x="560" y="330" text-anchor="middle" fill="#9c36b5">토큰 검증 (아웃바운드)</text>
+  <path class="edge-out" d="M378,378 C280,360 210,360 210,388"></path>
+</svg>
+<figcaption>테스트 구성 아키텍처. 개발자 랩탑이 <strong>Client VPN 터널</strong>(①)로 VPC에 진입하면, 같은 랩탑의 Claude Code CLI와 브라우저가 모두 Private Subnet의 게이트웨이에 도달한다(②). gateway와 postgres는 <strong>별도 Fargate Task</strong>로 분리되어 Cloud Map DNS로 통신한다. 보라 점선은 게이트웨이가 NAT를 거쳐 Cognito로 나가는 아웃바운드 경로다. 편집 가능한 원본: <a href="assets/gateway-test-setup.excalidraw">gateway-test-setup.excalidraw</a> (excalidraw.com에서 열기).</figcaption>
+</figure>
+<pre><code>[개발자 랩탑: Claude Code CLI + 브라우저]
+   |  ① AWS Client VPN 터널(mutual TLS)로 VPC 진입
+   v
+   VPC (us-east-1, 단일 AZ)
+   +- Public Subnet:  NAT Gateway (게이트웨이의 아웃바운드용)
+   +- Private Subnet: Client VPN ENI --(② 사설 IP)--> claude gateway
+                      ECS Task(gateway):  claude gateway (listen.tls로 HTTPS 종단)
+                      ECS Task(postgres): postgres:16   &lt;- RDS 대체, Cloud Map DNS
+                      Amazon Bedrock (업스트림)
+
+[Cognito] &lt;-- 브라우저 SSO(공개 인터넷) · 게이트웨이 토큰 검증(NAT 경유)</code></pre>
+
+<h2>전제 조건 (미리 갖춰야 할 것)</h2>
+<ul>
+<li>AWS 계정과 us-east-1 사용 권한 (VPC·ECS·IAM·Cognito·Bedrock·Client VPN·Route53·Cloud Map 생성 권한)</li>
+<li>개발자 랩탑에 Claude Code <strong>v2.1.195 이상</strong> 설치, 게이트웨이 컨테이너의 바이너리도 <em>동일 버전 이상</em></li>
+<li>랩탑에 <a href="https://aws.amazon.com/vpn/client-vpn-download/" target="_blank">AWS VPN Client</a> 앱과 인증서 생성용 <code>easy-rsa</code>(OpenVPN) — mutual TLS 인증서는 단계 3(<a href="setup-client-vpn.html">Client VPN 설정</a>)에서 직접 만든다</li>
+</ul>
+
+<div class="callout">
+<strong>단계 사이에 의존이 있어 순서가 중요하다.</strong>
+Cognito App Client의 콜백 URL에는 게이트웨이 hostname이 필요하고(단계 1), 그 hostname의 실제 IP 매핑은 게이트웨이 배포 후에야 정해진다(단계 5). 이 순환을 풀기 위해 <strong>단계 0에서 hostname을 "이름만" 먼저 확정</strong>한다. 이름은 IP가 없어도 정할 수 있으므로, 이후 Cognito·Route53·<code>gateway.yaml</code>이 모두 그 이름을 참조하고, 이름→IP 매핑만 나중에 채운다.
+</div>
+
+<h2>단계 0 · 사전 준비 (다른 단계가 의존하는 값 확정)</h2>
+<ol>
+<li><strong>게이트웨이 hostname을 이름으로 확정</strong>한다 (예: <code>claude-gw.internal.example.com</code>). 아직 리소스를 만들지 않고 이름만 정한다 — 이후 Cognito 콜백(단계 1), Route53 A 레코드(단계 2·5), <code>gateway.yaml</code>의 <code>public_url</code>(단계 4), <code>managed-settings.json</code>(단계 6)이 전부 이 이름을 쓴다. 이 이름은 <strong>실제로 소유한 도메인일 필요가 없다</strong> — 단계 2의 Route53 private hosted zone은 VPC 안에서만 유효하고 인터넷 DNS와 분리되므로, <code>internal.example.com</code> 같은 임의의 이름을 도메인 구매 없이 쓸 수 있다.</li>
+<li><strong>CIDR 대역을 정한다.</strong> 아래 값을 기본 제안으로 쓴다. 이 값에서 Route53 Resolver 주소(VPC CIDR의 <code>+2</code>)와 Client VPN 클라이언트 대역이 파생되므로 먼저 확정한다.
+<table>
+<tr><th>항목</th><th>CIDR</th><th>비고</th></tr>
+<tr><td>VPC</td><td><code>10.0.0.0/16</code></td><td>Route53 Resolver = <code>10.0.0.2</code></td></tr>
+<tr><td>├ Public Subnet</td><td><code>10.0.0.0/24</code></td><td>NAT Gateway 배치</td></tr>
+<tr><td>└ Private Subnet</td><td><code>10.0.1.0/24</code></td><td>gateway·postgres Task, Client VPN 연결</td></tr>
+<tr><td>Client VPN 클라이언트</td><td><code>172.16.0.0/22</code></td><td>VPC와 겹치지 않는 대역</td></tr>
+</table>
+</li>
+<li><strong>Bedrock 모델 액세스를 활성화</strong>한다 (us-east-1, Opus·Sonnet·Haiku). 승인에 시간이 걸릴 수 있어 가장 먼저 신청해 둔다.</li>
+</ol>
+<div class="callout">
+<strong>CIDR 두 개는 서로도, 랩탑의 로컬망과도 겹치면 안 된다.</strong>
+Client VPN 클라이언트 대역(<code>172.16.0.0/22</code>)을 VPC(<code>10.0.0.0/16</code>)와 다른 대역으로 둬야, 랩탑이 VPN에 붙었을 때 주소가 충돌하지 않는다. 클라이언트 CIDR은 AWS 제약상 <strong><code>/22</code> 이상</strong>이어야 해서 <code>/24</code>가 아니라 <code>/22</code>를 썼다. 또한 랩탑이 접속하는 로컬망이나 회사 VPN이 이미 <code>10.0.0.0/16</code>·<code>172.16.0.0/22</code>를 쓰면 라우팅이 충돌하므로, 테스트 전 랩탑에서 <code>ifconfig</code>(macOS·Linux)나 <code>ipconfig</code>(Windows)로 현재 IP 대역을 확인한다. 겹치면 VPC를 <code>10.20.0.0/16</code> 같은 덜 흔한 대역으로 바꾼다.
+</div>
+
+<h2>단계 1 · Cognito (OIDC IdP) 준비</h2>
+<p>
+<em>선행: 단계 0의 게이트웨이 hostname.</em> Claude Apps Gateway는 로그인 전체를 IdP에 위임하므로, IdP 없이는 어떤 테스트도 시작할 수 없다(SAML·LDAP 미지원, OIDC 전용).
+</p>
+<p>
+상세 절차는 <a href="setup-cognito.html">Cognito 설정</a> 문서에서 다룬다. 최신 콘솔은 애플리케이션 중심 흐름이라 애플리케이션 정보만 입력하면 User Pool과 App Client가 함께 자동 생성된다(풀 이름을 먼저 입력하는 칸은 없다). 요지만 정리하면:
+</p>
+<ul>
+<li>Application type = <strong>Traditional web application</strong> (client secret을 쓰는 confidential 클라이언트 → 게이트웨이 설정과 맞음)</li>
+<li>사인인 옵션 = <strong>Email</strong>, 필수 속성 = <strong><code>email</code></strong> (생성 후 변경 불가)</li>
+<li>콜백 URL = <code>https://&lt;gateway-hostname&gt;/oauth/callback</code></li>
+<li>생성 후: 이메일 자동 검증 활성화, MFA 끄기, Hosted UI 도메인 생성, <strong>테스트 사용자를 <code>email_verified: true</code>로 생성</strong></li>
+</ul>
+<p>
+다음 세 값을 메모해 단계 4의 <code>gateway.yaml</code> <code>oidc</code> 블록에 넣는다: <code>issuer</code>(<code>https://cognito-idp.us-east-1.amazonaws.com/&lt;pool-id&gt;</code>), <code>client_id</code>, <code>client_secret</code>.
+</p>
+<div class="callout">
+<strong>Cognito는 공개 엔드포인트라 브라우저 도달 문제가 없다.</strong>
+사설 IP resolution 제약은 <em>게이트웨이 자신</em>에만 적용되고 IdP에는 적용되지 않는다. Cognito 로그인 페이지는 공개 인터넷에서 열리므로, 랩탑 브라우저가 Cognito에 닿는 것은 문제가 아니다. 대신 게이트웨이(사설 IP)에 닿는 경로는 단계 2·3에서 Client VPN으로 마련한다.
+</div>
+
+<h2>단계 2 · 네트워크 (단일 AZ)</h2>
+<p><em>선행: 단계 0의 VPC CIDR·hostname.</em></p>
+<ol>
+<li>단계 0의 표대로 <strong>VPC(<code>10.0.0.0/16</code>) + Public Subnet(<code>10.0.0.0/24</code>) + Private Subnet(<code>10.0.1.0/24</code>)</strong>을 만든다</li>
+<li><strong>NAT Gateway</strong>를 Public Subnet에 배치 — 게이트웨이가 Cognito·Bedrock·ECR로 나가는 아웃바운드 경로. Cognito는 VPC 엔드포인트를 제공하지 않으므로 NAT가 사실상 필수다. (이 구성에서 Public Subnet은 NAT 전용이다 — 클라이언트 EC2는 두지 않는다.)</li>
+<li>VPC 속성 <code>enableDnsHostnames</code>와 <code>enableDnsSupport</code>를 <strong>둘 다 <code>true</code></strong>로 설정한다 — 이게 꺼져 있으면 다음의 private hosted zone이 동작하지 않는다.</li>
+<li><strong>Route53 private hosted zone</strong>을 만들어(도메인 이름 = hostname의 부모 도메인 <code>internal.example.com</code>, Type = Private hosted zone) 이 VPC에 연결한다. 게이트웨이 hostname의 A 레코드(이름 = <code>claude-gw</code>)는 gateway Task(ECS)의 사설 IP가 나오는 <strong>단계 5에서 채운다</strong>(지금은 zone만 준비). VPN으로 들어온 랩탑은 이후 이 이름을 사설 IP로 resolve하게 된다. VPC DNS 속성 확인부터 zone 생성·A 레코드까지의 전체 절차는 <a href="setup-route53-private-zone.html">Route53 Private Zone 설정</a> 문서에서 다룬다.</li>
+</ol>
+<div class="callout">
+<strong>NAT가 없으면 로그인이 실패한다.</strong>
+게이트웨이는 Cognito에 토큰을 검증하러 나가야 하는데, Cognito는 VPC 엔드포인트가 없어 이 아웃바운드가 NAT를 거친다. NAT가 없으면 이 경로가 막혀 로그인이 완료되지 않는다.
+</div>
+<div class="callout">
+<strong>zone 이름은 hostname 전체가 아니라 부모 도메인이다 (헷갈리기 쉬운 지점).</strong>
+zone 도메인 이름에는 게이트웨이 hostname 전체(<code>claude-gw.internal.example.com</code>)가 아니라 그 <strong>부모 도메인(<code>internal.example.com</code>)</strong>을 입력한다. hosted zone은 자기 도메인 이름과 그 하위(subdomain) 레코드를 담는 그릇이므로, 부모 도메인으로 zone을 만들면 그 안에 이름이 <code>claude-gw</code>인 레코드를 두어 완성 이름 <code>claude-gw.internal.example.com</code>을 만든다("레코드 이름 + zone 이름"이 합쳐진다). 이렇게 하면 <code>db</code>·<code>api</code> 같은 형제 이름을 같은 zone에 나란히 추가할 수 있어, 게이트웨이 외에 이름 있는 리소스를 더 두거나 운영 환경으로 확장할 때 자연스럽다. 자세한 절차는 <a href="setup-route53-private-zone.html">Route53 Private Zone 설정</a> 문서에 있다.
+</div>
+
+<h2>단계 3 · AWS Client VPN (랩탑 → VPC 진입)</h2>
+<p>
+<em>선행: 단계 2의 VPC·Private Subnet.</em> 랩탑은 VPC 밖에 있어, Private Subnet의 게이트웨이에 인터넷에서 직접 닿을 수 없다(게이트웨이는 사설 IP로만 접근을 허용한다). Client VPN으로 랩탑을 VPC 사설망에 넣어, 랩탑의 Claude Code CLI와 브라우저가 모두 게이트웨이에 도달하게 한다.
+</p>
+<p>
+인증서 생성(easy-rsa)부터 ACM 업로드, 엔드포인트 구성, 랩탑 접속까지의 전체 절차는 <a href="setup-client-vpn.html">Client VPN 설정</a> 문서에서 다룬다. 요점만 정리하면:
+</p>
+<ul>
+<li>mutual TLS 인증 — easy-rsa로 CA·서버·클라이언트 인증서를 만들고, <strong>서버 인증서를 us-east-1 ACM에 업로드</strong>한다.</li>
+<li>엔드포인트의 <strong>클라이언트 CIDR = <code>172.16.0.0/22</code></strong>(단계 0), <strong>Private Subnet에 연결</strong>, <strong>VPC CIDR 허용 규칙</strong> 추가.</li>
+<li><strong>DNS 서버 = VPC Route53 Resolver(<code>10.0.0.2</code>)</strong> — 이래야 랩탑이 게이트웨이 hostname을 사설 IP로 resolve한다(가장 자주 누락되는 항목).</li>
+</ul>
+
+<h2>단계 4 · gateway.yaml</h2>
+<p><em>선행: 단계 0의 hostname, 단계 1의 Cognito 값.</em> 이 설정 파일을 먼저 작성해야 다음 단계에서 gateway 이미지를 빌드·배포할 수 있다. postgres를 가리키는 Cloud Map 이름(<code>postgres.claude-gw.local</code>)은 우리가 정하는 규칙이므로, 배포 전이라도 미리 확정해 여기에 쓴다.</p>
+<pre><code>listen:
+  host: 0.0.0.0
+  port: 8080
+  public_url: https://&lt;gateway-hostname&gt;      # 랩탑 CLI·브라우저가 접근하는 이름
+  tls:                                         # 게이트웨이가 직접 HTTPS 종단
+    cert_file: /etc/claude/tls/cert.pem
+    key_file: /etc/claude/tls/key.pem
+
+oidc:
+  issuer: https://cognito-idp.us-east-1.amazonaws.com/&lt;pool-id&gt;
+  client_id: &lt;cognito-app-client-id&gt;
+  client_secret: ${OIDC_CLIENT_SECRET}
+  allowed_email_domains: [&lt;your-domain&gt;]
+
+session:
+  jwt_secret: ${GATEWAY_JWT_SECRET}
+  ttl_hours: 1
+
+store:
+  # 별도 postgres Task를 Cloud Map 이름으로 가리킨다 (localhost 아님)
+  postgres_url: ${GATEWAY_POSTGRES_URL}        # postgres://user:pass@postgres.claude-gw.local:5432/gateway
+
+upstreams:
+  - provider: bedrock
+    region: us-east-1
+    auth: {}                                   # 비우면 Task Role 사용
+    auto_include_builtin_models: true</code></pre>
+<p>
+이 <code>gateway.yaml</code>과 TLS 인증서를 gateway 컨테이너 이미지에 포함하는 방법은 <a href="build-images.html">이미지 준비</a>에서 다룬다.
+</p>
+
+<h2>단계 5 · Fargate — gateway·postgres 별도 Task</h2>
+<p>
+<em>선행: 단계 4의 <code>gateway.yaml</code>, <a href="build-images.html">이미지 준비</a>에서 만든 두 컨테이너 이미지, 단계 1의 Cognito 값, 단계 2의 서브넷.</em> gateway와 postgres를 <strong>별도의 ECS Task</strong>로 분리한다.
+</p>
+<ol>
+<li><strong>postgres Task/Service</strong> — <code>postgres:16</code> 이미지를 ECS Service로 띄우고 Private Subnet에 배치한다. 서비스 생성 화면의 <strong>Service Discovery 설정</strong>에서 네임스페이스 이름(<code>claude-gw.local</code>)과 서비스 이름(<code>postgres</code>)을 입력하면, <strong>ECS가 Cloud Map private DNS namespace를 자동으로 생성</strong>하고 이 Task를 <code>postgres.claude-gw.local</code>로 등록한다(단계 4의 <code>postgres_url</code>과 일치). 즉 Cloud Map을 별도로 먼저 만들 필요가 없다.</li>
+<li><strong>gateway Task/Service</strong> — <a href="build-images.html">이미지 준비</a>에서 ECR에 올린 gateway 이미지로 ECS Service를 띄운다. 위 postgres와 <strong>같은 네임스페이스(<code>claude-gw.local</code>)</strong>를 지정해, 게이트웨이가 <code>postgres.claude-gw.local</code>로 DB를 찾게 한다. (이 이미지에는 단계 4의 <code>gateway.yaml</code>과 TLS 인증서가 이미 포함돼 있어 <code>listen.tls</code>로 HTTPS를 직접 종단한다.)</li>
+<li><strong>Task Role</strong>(gateway)에 <code>bedrock:InvokeModel</code> 등 Bedrock 호출 권한 부여</li>
+<li><strong>보안 그룹</strong> — postgres SG는 gateway SG로부터의 5432를 허용하고, gateway SG는 Client VPN 클라이언트 CIDR로부터의 443을 허용한다.</li>
+<li>비밀값 주입: <code>OIDC_CLIENT_SECRET</code>·<code>GATEWAY_JWT_SECRET</code>·<code>GATEWAY_POSTGRES_URL</code>·admin 키 (테스트면 Task Definition 환경변수 직접 주입도 가능)</li>
+<li>gateway Task의 사설 IP가 정해지면, <strong>단계 2에서 만든 private hosted zone에 A 레코드를 채운다</strong>(hostname → 이 사설 IP). 이것으로 단계 0에서 이름만 정해 둔 hostname이 실제 IP와 연결된다.</li>
+</ol>
+<div class="callout">
+<strong>별도 Task라 gateway 재배포에도 상태가 유지된다.</strong>
+사이드카(같은 Task) 방식과 달리, gateway만 재시작해도 postgres Task는 살아 있어 로그인·세션 상태가 보존된다. 다만 postgres 컨테이너 자체가 교체되면(재배포·장애) 상태는 사라지므로, 영속 저장이 필요하면 EFS 볼륨을 붙이거나 RDS로 전환한다.
+</div>
+
+<h2>단계 6 · 클라이언트(랩탑) 설정</h2>
+<p><em>선행: 단계 0의 hostname.</em></p>
+<ol>
+<li>랩탑에 Claude Code <strong>v2.1.195+</strong> 설치</li>
+<li><code>managed-settings.json</code>에 게이트웨이 강제 로그인 설정을 작성한다. 경로는 랩탑 OS에 따라 다르다:
+<ul>
+<li>macOS: <code>/Library/Application Support/ClaudeCode/managed-settings.json</code></li>
+<li>Linux/WSL: <code>/etc/claude-code/managed-settings.json</code></li>
+<li>Windows: <code>C:\Program Files\ClaudeCode\managed-settings.json</code></li>
+</ul>
+<pre><code>{
+  "forceLoginMethod": "gateway",
+  "forceLoginGatewayUrl": "https://&lt;gateway-hostname&gt;"
+}</code></pre>
+</li>
+</ol>
+
+<h2>단계 7 · 로그인·추론 테스트 (성공 판정)</h2>
+<ol>
+<li>랩탑에서 <strong>AWS VPN Client로 Client VPN에 접속</strong>한다(VPC 진입).</li>
+<li><code>nslookup &lt;gateway-hostname&gt;</code>으로 <strong>사설 IP가 나오는지</strong> 먼저 확인한다(DNS 검증).</li>
+<li>랩탑 터미널에서 <code>claude</code> 실행 후 <code>/login</code></li>
+<li>CLI가 <strong>사용자 코드와 확인 URL</strong>을 표시한다</li>
+<li>같은 랩탑의 브라우저에서 그 URL을 열고, 사용자 코드를 입력한다</li>
+<li>Cognito 로그인 화면에서 테스트 사용자로 로그인·승인한다</li>
+<li>CLI의 polling이 <strong>세션 토큰을 받아 대기를 끝낸다</strong></li>
+<li>모델을 호출해 응답이 오면 성공이다</li>
+</ol>
+<p>
+이 흐름의 내부 동작(디바이스 코드·polling·리다이렉트)이 궁금하면 <a href="lessons/0004-device-auth-flow.html">디바이스 인증 플로우 자세히</a>를 참고한다. CLI와 브라우저가 같은 랩탑에 있으므로, 디바이스 플로우가 "서로 다른 기기"일 필요가 없는 가장 단순한 형태로 동작한다.
+</p>
+
+<h2>막히면 여기부터 확인</h2>
+<ul>
+<li><strong>hostname resolve 실패</strong> — <code>nslookup</code>이 사설 IP를 안 주면, Client VPN의 DNS가 VPC Route53 Resolver로 설정됐는지, private hosted zone에 A 레코드가 있는지 확인한다.</li>
+<li><strong>VPN 연결됐는데 게이트웨이 접근 불가</strong> — Client VPN authorization rule에 VPC CIDR 허용이 있는지, gateway SG가 클라이언트 CIDR의 443을 허용하는지 확인한다.</li>
+<li><strong>게이트웨이가 DB 연결 실패</strong> — <code>GATEWAY_POSTGRES_URL</code>의 Cloud Map 이름이 맞는지, postgres SG가 gateway SG의 5432를 허용하는지 확인한다.</li>
+<li><strong>사설 IP 거부</strong> — 게이트웨이 hostname이 공개 IP로 resolve되면 <code>/login</code>이 거부된다. 사설 IP로 풀리는지 확인한다.</li>
+<li><strong>로그인 콜백 실패</strong> — <code>public_url</code>과 Cognito에 등록한 <code>redirect_uri</code>가 정확히 일치하는지 확인한다.</li>
+<li><strong>토큰 검증 실패</strong> — gateway Task가 NAT를 통해 Cognito로 나가는지, 테스트 사용자의 <code>email_verified</code>가 true인지 확인한다.</li>
+<li><strong>모델 호출 실패</strong> — Bedrock 모델 액세스가 활성화됐는지, Task Role에 <code>bedrock:InvokeModel</code>이 있는지 확인한다.</li>
+</ul>
+
+<h2>정석 구성으로 전환하는 지점</h2>
+<ul>
+<li>관리형 DB·백업·가용성 필요 → 별도 postgres Task를 <strong>RDS PostgreSQL(2 AZ)</strong>로 교체</li>
+<li>공인 인증서·확장성 필요 → 게이트웨이 자체 TLS를 <strong>ALB(2 AZ, ACM 인증서)</strong> 종단으로 교체</li>
+<li>상시·전사 접속 필요 → Client VPN을 <strong>Direct Connect나 Site-to-Site VPN</strong> 기반의 상시 사설 연결로 교체(블로그가 제시하는 운영 구성)</li>
+<li>그룹별 모델·사용량 제어 → <code>gateway.yaml</code>에 <code>managed</code>·<code>admin</code> 블록 추가 (<a href="lessons/0002-components.html">gateway.yaml 설정 구조</a>의 선택 블록 참고)</li>
+<li>사용량 모니터링 → <code>telemetry</code> 블록으로 CloudWatch 연동</li>
+</ul>
+
+<p class="source">
+출처: <a href="https://aws.amazon.com/ko/blogs/tech/claude-apps-gateway-with-aws/" target="_blank">Claude Apps Gateway on AWS 자세히 알아보기 (AWS 기술 블로그)</a>,
+<a href="https://code.claude.com/docs/en/claude-apps-gateway" target="_blank">Claude apps gateway (공식 문서)</a>,
+<a href="https://code.claude.com/docs/en/claude-apps-gateway-on-aws" target="_blank">Deploy Claude apps gateway on AWS (공식 문서)</a>
+</p>
+
+<div class="ask-agent">
+각 단계의 구체적 CLI 명령이나 Terraform/CloudFormation 예시가 필요하면 요청하세요.
+</div>
+
+<div class="nav-links">
+<span><a href="lessons/0004-device-auth-flow.html">&larr; 디바이스 인증</a></span>
+<span><a href="build-images.html">다음: 이미지 준비 &rarr;</a></span>
+</div>
+
+</div>
+<script src="assets/nav.js"></script>
+</body>
+</html>

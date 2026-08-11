@@ -1,0 +1,140 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "https://excalidraw.com",
+  "elements": [
+    {
+      "id": "grp1", "type": "rectangle", "x": 20, "y": 40, "width": 240, "height": 410,
+      "angle": 0, "strokeColor": "#8a4b2e", "backgroundColor": "#f4ece3", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": { "type": 3 }, "seed": 300001, "version": 1, "versionNonce": 400001,
+      "isDeleted": false, "boundElements": [], "updated": 1717000000000, "link": null, "locked": false
+    },
+    {
+      "id": "grp1t", "type": "text", "x": 60, "y": 52, "width": 160, "height": 20,
+      "angle": 0, "strokeColor": "#8a4b2e", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": null, "seed": 300002, "version": 1, "versionNonce": 400002,
+      "isDeleted": false, "boundElements": [], "updated": 1717000000000, "link": null, "locked": false,
+      "fontSize": 16, "fontFamily": 5, "text": "누가 들어오는가", "textAlign": "center",
+      "verticalAlign": "top", "containerId": null, "originalText": "누가 들어오는가", "lineHeight": 1.25
+    },
+    {
+      "id": "b1", "type": "rectangle", "x": 45, "y": 90, "width": 190, "height": 70,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "#a5d8ff", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": { "type": 3 }, "seed": 300003, "version": 1, "versionNonce": 400003,
+      "isDeleted": false, "boundElements": [{ "type": "text", "id": "b1t" }], "updated": 1717000000000, "link": null, "locked": false
+    },
+    {
+      "id": "b1t", "type": "text", "x": 65, "y": 108, "width": 150, "height": 40,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": null, "seed": 300004, "version": 1, "versionNonce": 400004,
+      "isDeleted": false, "boundElements": [], "updated": 1717000000000, "link": null, "locked": false,
+      "fontSize": 15, "fontFamily": 5, "text": "listen\n바인딩 주소 · public_url", "textAlign": "center",
+      "verticalAlign": "middle", "containerId": "b1", "originalText": "listen\n바인딩 주소 · public_url", "lineHeight": 1.25
+    },
+    {
+      "id": "b2", "type": "rectangle", "x": 45, "y": 185, "width": 190, "height": 90,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "#a5d8ff", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": { "type": 3 }, "seed": 300005, "version": 1, "versionNonce": 400005,
+      "isDeleted": false, "boundElements": [{ "type": "text", "id": "b2t" }], "updated": 1717000000000, "link": null, "locked": false
+    },
+    {
+      "id": "b2t", "type": "text", "x": 65, "y": 205, "width": 150, "height": 50,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": null, "seed": 300006, "version": 1, "versionNonce": 400006,
+      "isDeleted": false, "boundElements": [], "updated": 1717000000000, "link": null, "locked": false,
+      "fontSize": 15, "fontFamily": 5, "text": "oidc\nIdP 연동 · 로그인 승인 조건", "textAlign": "center",
+      "verticalAlign": "middle", "containerId": "b2", "originalText": "oidc\nIdP 연동 · 로그인 승인 조건", "lineHeight": 1.25
+    },
+    {
+      "id": "grp2", "type": "rectangle", "x": 280, "y": 40, "width": 240, "height": 410,
+      "angle": 0, "strokeColor": "#8a4b2e", "backgroundColor": "#f4ece3", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": { "type": 3 }, "seed": 300007, "version": 1, "versionNonce": 400007,
+      "isDeleted": false, "boundElements": [], "updated": 1717000000000, "link": null, "locked": false
+    },
+    {
+      "id": "grp2t", "type": "text", "x": 315, "y": 52, "width": 170, "height": 20,
+      "angle": 0, "strokeColor": "#8a4b2e", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": null, "seed": 300008, "version": 1, "versionNonce": 400008,
+      "isDeleted": false, "boundElements": [], "updated": 1717000000000, "link": null, "locked": false,
+      "fontSize": 16, "fontFamily": 5, "text": "들어온 뒤 상태 유지", "textAlign": "center",
+      "verticalAlign": "top", "containerId": null, "originalText": "들어온 뒤 상태 유지", "lineHeight": 1.25
+    },
+    {
+      "id": "b3", "type": "rectangle", "x": 305, "y": 90, "width": 190, "height": 90,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "#b2f2bb", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": { "type": 3 }, "seed": 300009, "version": 1, "versionNonce": 400009,
+      "isDeleted": false, "boundElements": [{ "type": "text", "id": "b3t" }], "updated": 1717000000000, "link": null, "locked": false
+    },
+    {
+      "id": "b3t", "type": "text", "x": 325, "y": 110, "width": 150, "height": 50,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": null, "seed": 300010, "version": 1, "versionNonce": 400010,
+      "isDeleted": false, "boundElements": [], "updated": 1717000000000, "link": null, "locked": false,
+      "fontSize": 15, "fontFamily": 5, "text": "session\n세션 토큰(JWT)\n서명 비밀값 · TTL", "textAlign": "center",
+      "verticalAlign": "middle", "containerId": "b3", "originalText": "session\n세션 토큰(JWT)\n서명 비밀값 · TTL", "lineHeight": 1.25
+    },
+    {
+      "id": "b4", "type": "rectangle", "x": 305, "y": 205, "width": 190, "height": 90,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "#b2f2bb", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": { "type": 3 }, "seed": 300011, "version": 1, "versionNonce": 400011,
+      "isDeleted": false, "boundElements": [{ "type": "text", "id": "b4t" }], "updated": 1717000000000, "link": null, "locked": false
+    },
+    {
+      "id": "b4t", "type": "text", "x": 325, "y": 225, "width": 150, "height": 50,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": null, "seed": 300012, "version": 1, "versionNonce": 400012,
+      "isDeleted": false, "boundElements": [], "updated": 1717000000000, "link": null, "locked": false,
+      "fontSize": 15, "fontFamily": 5, "text": "store\nPostgreSQL\n로그인 상태 저장", "textAlign": "center",
+      "verticalAlign": "middle", "containerId": "b4", "originalText": "store\nPostgreSQL\n로그인 상태 저장", "lineHeight": 1.25
+    },
+    {
+      "id": "grp3", "type": "rectangle", "x": 540, "y": 40, "width": 220, "height": 410,
+      "angle": 0, "strokeColor": "#8a4b2e", "backgroundColor": "#f4ece3", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": { "type": 3 }, "seed": 300013, "version": 1, "versionNonce": 400013,
+      "isDeleted": false, "boundElements": [], "updated": 1717000000000, "link": null, "locked": false
+    },
+    {
+      "id": "grp3t", "type": "text", "x": 570, "y": 52, "width": 160, "height": 20,
+      "angle": 0, "strokeColor": "#8a4b2e", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": null, "seed": 300014, "version": 1, "versionNonce": 400014,
+      "isDeleted": false, "boundElements": [], "updated": 1717000000000, "link": null, "locked": false,
+      "fontSize": 16, "fontFamily": 5, "text": "요청의 최종 목적지", "textAlign": "center",
+      "verticalAlign": "top", "containerId": null, "originalText": "요청의 최종 목적지", "lineHeight": 1.25
+    },
+    {
+      "id": "b5", "type": "rectangle", "x": 565, "y": 90, "width": 170, "height": 90,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "#ffd43b", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": { "type": 3 }, "seed": 300015, "version": 1, "versionNonce": 400015,
+      "isDeleted": false, "boundElements": [{ "type": "text", "id": "b5t" }], "updated": 1717000000000, "link": null, "locked": false
+    },
+    {
+      "id": "b5t", "type": "text", "x": 585, "y": 110, "width": 130, "height": 50,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent", "fillStyle": "solid",
+      "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100, "groupIds": [],
+      "roundness": null, "seed": 300016, "version": 1, "versionNonce": 400016,
+      "isDeleted": false, "boundElements": [], "updated": 1717000000000, "link": null, "locked": false,
+      "fontSize": 15, "fontFamily": 5, "text": "upstreams\n모델 제공자 목록\n자격증명 · 노출 모델", "textAlign": "center",
+      "verticalAlign": "middle", "containerId": "b5", "originalText": "upstreams\n모델 제공자 목록\n자격증명 · 노출 모델", "lineHeight": 1.25
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff",
+    "gridSize": 20
+  },
+  "files": {}
+}

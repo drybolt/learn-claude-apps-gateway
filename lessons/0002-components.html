@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>2. gateway.yaml 설정 구조</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<p class="kicker">Lesson 2 · gateway.yaml 설정</p>
+<h1>gateway.yaml 설정 구조</h1>
+<p class="subtitle">gateway.yaml을 이루는 핵심 다섯 블록과 네 개의 선택 블록.</p>
+
+<p>
+게이트웨이의 동작은 <code>gateway.yaml</code> 설정 파일 하나로 정의된다. 이 파일은 다섯 개의 최상위 블록으로 구성되며, 각 블록은 뚜렷하게 구분되는 역할을 맡는다. <code>listen</code>과 <code>oidc</code>는 누가 들어오는지를, <code>session</code>과 <code>store</code>는 들어온 뒤 상태를 어떻게 유지하는지를, <code>upstreams</code>는 요청이 최종적으로 어디로 가는지를 담당한다. 아래는 공식 문서의 최소 예시로, 사인인 흐름이 동작하는 데 필요한 다섯 블록만 담았다(나머지 옵션은 기본값을 쓴다). 이어지는 절에서 이 다섯 블록을 하나씩 설명하고, 마지막에 모델 노출·정책·텔레메트리·지출 한도를 켜는 네 개의 선택 블록(<code>models</code>·<code>managed</code>·<code>telemetry</code>·<code>admin</code>)을 덧붙인다.
+</p>
+<pre><code>listen:
+  host: 0.0.0.0
+  port: 8080
+  # 개발자·브라우저가 접근하는 외부 주소. 사설 IP로 resolve되어야 한다.
+  public_url: https://claude-gateway.internal.example.com
+
+oidc:                                    # 어떤 IdP로 로그인시킬지
+  issuer: https://login.example.com
+  client_id: 0oa1example2
+  client_secret: ${OIDC_CLIENT_SECRET}   # 값이 아니라 환경변수를 참조
+  allowed_email_domains: [example.com]   # 조직 외부 계정 차단
+
+session:                                 # 발급할 세션 토큰
+  jwt_secret: ${GATEWAY_JWT_SECRET}
+  ttl_hours: 1                           # 토큰 유효 기간(기본 1시간)
+
+store:                                   # 로그인 상태를 담는 DB
+  postgres_url: ${GATEWAY_POSTGRES_URL}
+
+upstreams:                               # 실제 모델을 호출할 대상
+  - provider: bedrock
+    region: us-east-1
+    auth: {}                             # 비우면 AWS 기본 자격증명 체인 사용
+  auto_include_builtin_models: true      # 기본 모델 카탈로그 노출</code></pre>
+<p>
+비밀값은 <code>${ENV_VAR}</code> 형태로 환경변수를 참조하므로, 이 파일 자체는 비밀을 담지 않아 버전 관리에 넣어도 된다.
+</p>
+
+<h2>다섯 블록의 역할 구조</h2>
+<p>
+다섯 블록은 세 가지 역할 그룹으로 묶인다. 아래 구성도는 각 블록이 게이트웨이 안에서 어느 역할을 맡는지를 보여준다.
+</p>
+<figure class="diagram">
+<svg viewBox="0 0 780 470" role="img" aria-label="gateway.yaml 다섯 블록을 세 역할 그룹으로 묶은 구성도" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .grp { fill: #f4ece3; stroke: #8a4b2e; stroke-width: 1.5; }
+    .grplbl { font-family: "Nanum Gothic", sans-serif; font-size: 14px; font-weight: 700; fill: #8a4b2e; }
+    .blk { stroke: #1e1e1e; stroke-width: 1.5; }
+    .b-in { fill: #a5d8ff; }
+    .b-state { fill: #b2f2bb; }
+    .b-out { fill: #ffd43b; }
+    .name { font-family: "D2Coding", monospace; font-size: 15px; font-weight: 700; fill: #1a1a1a; }
+    .desc { font-family: "Nanum Gothic", sans-serif; font-size: 12px; fill: #333; }
+  </style>
+
+  <!-- Group 1: 누가 들어오는가 -->
+  <rect class="grp" x="20" y="40" width="240" height="410" rx="10"></rect>
+  <text class="grplbl" x="140" y="66" text-anchor="middle">누가 들어오는가</text>
+  <rect class="blk b-in" x="45" y="90" width="190" height="70" rx="8"></rect>
+  <text class="name" x="140" y="118" text-anchor="middle">listen</text>
+  <text class="desc" x="140" y="140" text-anchor="middle">바인딩 주소 · public_url</text>
+  <rect class="blk b-in" x="45" y="185" width="190" height="90" rx="8"></rect>
+  <text class="name" x="140" y="213" text-anchor="middle">oidc</text>
+  <text class="desc" x="140" y="235" text-anchor="middle">IdP 연동 · 로그인</text>
+  <text class="desc" x="140" y="253" text-anchor="middle">승인 조건</text>
+
+  <!-- Group 2: 상태 유지 -->
+  <rect class="grp" x="280" y="40" width="240" height="410" rx="10"></rect>
+  <text class="grplbl" x="400" y="66" text-anchor="middle">들어온 뒤 상태 유지</text>
+  <rect class="blk b-state" x="305" y="90" width="190" height="90" rx="8"></rect>
+  <text class="name" x="400" y="118" text-anchor="middle">session</text>
+  <text class="desc" x="400" y="140" text-anchor="middle">세션 토큰(JWT)</text>
+  <text class="desc" x="400" y="158" text-anchor="middle">서명 비밀값 · TTL</text>
+  <rect class="blk b-state" x="305" y="205" width="190" height="90" rx="8"></rect>
+  <text class="name" x="400" y="233" text-anchor="middle">store</text>
+  <text class="desc" x="400" y="255" text-anchor="middle">PostgreSQL</text>
+  <text class="desc" x="400" y="273" text-anchor="middle">로그인 상태 저장</text>
+
+  <!-- Group 3: 최종 목적지 -->
+  <rect class="grp" x="540" y="40" width="220" height="410" rx="10"></rect>
+  <text class="grplbl" x="650" y="66" text-anchor="middle">요청의 최종 목적지</text>
+  <rect class="blk b-out" x="565" y="90" width="170" height="90" rx="8"></rect>
+  <text class="name" x="650" y="118" text-anchor="middle">upstreams</text>
+  <text class="desc" x="650" y="140" text-anchor="middle">모델 제공자 목록</text>
+  <text class="desc" x="650" y="158" text-anchor="middle">자격증명 · 노출 모델</text>
+</svg>
+<figcaption>gateway.yaml 다섯 블록의 역할 구조. 편집 가능한 원본: <a href="../assets/gateway-blocks.excalidraw">gateway-blocks.excalidraw</a> (excalidraw.com에서 열기).</figcaption>
+</figure>
+
+<h2>listen — 서버의 주소</h2>
+<p>
+이 블록은 성격이 다른 두 종류의 주소를 담는다. <code>host</code>·<code>port</code>는 게이트웨이 프로세스가 자기 호스트의 어느 인터페이스·포트에 바인딩할지를 정하는 <em>내부 바인딩 주소</em>이고, <code>public_url</code>은 바깥에서 그 서버를 어떤 이름으로 부르는지를 정하는 <em>외부 접근 주소</em>다. 둘을 나누어 두는 이유는 서버가 실제로 앉아 있는 자리와 외부에 노출되는 주소가 대개 다르기 때문이다.
+</p>
+<p>
+<code>host</code>와 <code>port</code>는 게이트웨이 프로세스가 내부적으로 바인딩하는 주소다. 여기서 바인딩(binding)은 게이트웨이 프로세스가 운영체제로부터 특정 네트워크 인터페이스와 포트 번호를 할당받아, 그 조합으로 들어오는 TCP 연결만 수신하도록 소켓을 여는 동작이다. 예시의 <code>host: 0.0.0.0</code>은 특정 인터페이스 하나가 아니라 그 호스트의 모든 네트워크 인터페이스에서 연결을 받겠다는 의미이고(반대로 <code>127.0.0.1</code>로 두면 같은 호스트 내부의 요청만 받는다), <code>port: 8080</code>은 그 인터페이스에서 8080번 포트를 점유한다는 뜻이다. 이 값은 게이트웨이 프로세스가 자기 호스트의 어느 인터페이스·포트에 바인딩할지를 정할 뿐, 외부에서 그 주소로 도달 가능한지는 방화벽·리버스 프록시·DNS 같은 바깥 계층이 따로 결정한다.
+</p>
+<p>
+<code>public_url</code>은 개발자와 브라우저가 실제로 접근하는 외부 주소다. 게이트웨이가 IdP로 로그인 요청을 보낼 때 전달하는 redirect_uri(로그인 후 브라우저를 되돌려 받을 주소)도 이 값을 기준으로 게이트웨이가 생성하므로, 내부 바인딩 주소가 아니라 외부에서 도달하는 주소와 일치해야 한다. 실제 운영에서는 리버스 프록시나 로드밸런서가 이 외부 주소로 들어온 요청을 받아, 내부 바인딩 주소인 <code>host</code>:<code>port</code>로 전달한다. 따라서 이 블록은 서버 자신이 어디에 있는지와 외부에서 어떻게 불리는지를 분리해서 표현한다.
+</p>
+
+<h2>oidc — 로그인 연동</h2>
+<p>
+<code>issuer</code>는 <code>/.well-known/openid-configuration</code>을 서빙하는 IdP 주소다. 게이트웨이는 이 표준 OIDC discovery를 통해 IdP와의 통신 방식을 스스로 알아낸다. <code>client_id</code>와 <code>client_secret</code>은 IdP에 미리 등록해 둔 OAuth 애플리케이션의 자격증명이고, <code>allowed_email_domains</code>는 조직 외부 계정의 로그인을 막는 1차 필터다. IdP에 따라 <code>id_token</code>에 이메일이나 그룹 정보를 담지 않는 경우가 있는데, 이때는 <code>userinfo_fallback: true</code>를 설정해 userinfo 엔드포인트에서 해당 정보를 보완해 가져온다.
+</p>
+
+<div class="callout">
+<strong>issuer 하나만 적으면 나머지는 자동으로 발견된다.</strong>
+설정 파일에는 IdP의 기본 주소 하나만 <code>issuer</code>에 적으면 되고, 로그인에 필요한 세부 주소(로그인 페이지, 인증 결과를 받는 엔드포인트, 토큰 서명 검증용 키의 위치)는 게이트웨이가 직접 알아낸다. <code>/.well-known/openid-configuration</code>은 OIDC(OpenID Connect, 표준 로그인 규격) 표준이 정한 고정 경로이고, 표준을 따르는 IdP는 이 경로로 요청이 오면 자기 설정 정보를 JSON으로 돌려준다("서빙한다"). 즉 <code>issuer: https://login.example.com</code>이라고 적으면 게이트웨이는 <code>https://login.example.com/.well-known/openid-configuration</code>에 접속해 그 IdP의 로그인 관련 주소와 키 정보를 한 번에 받아온다. 개발자가 이 세부 항목을 일일이 설정 파일에 적을 필요가 없다. 이 과정을 OIDC discovery라 부른다.
+</div>
+
+<div class="callout">
+<strong>client_id·client_secret은 IdP가 발급한다.</strong>
+이 두 값은 게이트웨이가 스스로 만드는 것이 아니라 IdP가 내어 주는 값이다. 게이트웨이를 IdP에 연동하려면 먼저 IdP 관리 콘솔에서 게이트웨이를 하나의 OAuth 애플리케이션(클라이언트)으로 등록해야 하고, 등록을 마치면 IdP가 그 애플리케이션을 식별하는 공개 ID(<code>client_id</code>)와 그 애플리케이션임을 증명하는 비밀 키(<code>client_secret</code>)를 발급한다. 관리자는 이 두 값을 받아 <code>gateway.yaml</code>에 적는다. 앞서 나온 <code>redirect_uri</code>와는 발급 주체가 반대다. <code>redirect_uri</code>는 게이트웨이가 IdP로 요청을 보낼 때 생성해 전달하는 값이고, <code>client_id</code>·<code>client_secret</code>은 IdP가 게이트웨이에 발급해 주는 값이다.
+</div>
+
+<div class="callout">
+<strong>id_token은 설정 항목이 아니라 IdP가 발급하는 신원 증명이다.</strong>
+<code>id_token</code>은 <code>gateway.yaml</code>에 적는 설정이 아니라, 개발자가 IdP에서 로그인을 마치면 IdP가 "이 사람은 확인된 사용자다"라며 게이트웨이에 건네주는 신원 증명 토큰이다. 형식은 서명된 JWT라서, 게이트웨이는 서명을 검증해 위조 여부를 확인한 뒤 안에 담긴 사용자 정보(이메일, 소속 그룹 등)를 읽어 접근 판단에 쓴다. 그런데 IdP에 따라 이 토큰에 최소한의 식별자만 담고 이메일·그룹을 넣지 않는 경우가 있다. 그러면 게이트웨이가 접근 판단에 필요한 정보를 얻지 못하므로, <code>userinfo_fallback: true</code>를 켜서 IdP의 별도 창구인 userinfo 엔드포인트에 다시 요청해 빠진 정보를 보완해 가져온다.
+</div>
+
+<h2>session — 로그인 이후의 신원 증명</h2>
+<p>
+로그인이 끝나면 게이트웨이는 자체 세션 토큰(JWT)을 발급한다. <code>jwt_secret</code>은 이 토큰에 서명하는 비밀값이고, <code>ttl_hours</code>는 토큰의 유효 기간을 정한다. 이 유효 기간은 재로그인 빈도와 접근 회수 반영 속도라는 두 가지를 동시에 결정한다. 값을 크게 하면 개발자가 재로그인하는 빈도는 줄어들지만, IdP에서 계정을 비활성화했을 때 그것이 반영되어 접근이 끊기기까지의 지연은 길어진다. 즉 이 둘은 한쪽을 개선하면 다른 쪽이 나빠지는 트레이드오프 관계다.
+</p>
+
+<div class="callout">
+<strong>JWT는 서명이 붙은 신원 증명이고, 서명은 암호화가 아니라 위조 방지 장치다.</strong>
+JWT(JSON Web Token)는 "누가 로그인했는가, 언제 만료되는가" 같은 정보를 담은 토큰으로, 점(<code>.</code>)으로 구분된 세 부분 — 헤더(header), 내용(payload), 서명(signature) — 으로 이루어진다. 발급자는 헤더와 내용에 비밀 키로 계산한 서명을 붙여 발급하고, 받는 쪽은 같은 키로 그 서명이 맞는지 검증해 "발급자가 실제로 만든, 위·변조되지 않은 토큰"임을 확인한다. 여기서 서명은 내용을 숨기는 암호화가 아니라는 점이 중요하다. payload는 누구나 열어 볼 수 있으므로 비밀번호 같은 민감 정보를 담지 않으며, 서명이 막는 것은 "내용을 몰래 바꾸는 것"이지 "내용을 보는 것"이 아니다. 그래서 게이트웨이는 세션 토큰을 <code>jwt_secret</code>으로 서명해 발급하고, 이후 들어오는 토큰의 서명을 같은 키로 검증해 자신이 발급한 것인지 판별한다.
+</div>
+
+<div class="callout">
+<strong>클라이언트(Claude Code CLI) 쪽에서 이 토큰은 어떻게 쓰이는가.</strong>
+session 블록은 게이트웨이가 토큰을 발급·검증하는 서버 쪽을 다루지만, 그 토큰을 실제로 들고 다니는 것은 클라이언트인 Claude Code CLI다. 클라이언트 관점의 흐름은 세 단계다. 첫째, 로그인이 끝나면 CLI는 게이트웨이가 발급한 세션 토큰을 자기 쪽에 저장한다. 둘째, 개발자가 모델을 호출할 때마다 CLI는 게이트웨이로 보내는 요청에 이 토큰을 함께 실어 보내고, 게이트웨이는 <code>jwt_secret</code>으로 서명을 검증한 뒤 요청을 처리한다 — 즉 매 요청마다 이 토큰으로 신원을 다시 증명한다. 셋째, 토큰에는 <code>ttl_hours</code>로 정한 유효 기간이 담겨 있어, 만료된 토큰으로 요청하면 게이트웨이가 거부하고 개발자는 다시 SSO 로그인을 거쳐 새 토큰을 발급받는다.
+</div>
+
+<h2>store — 상태 저장소</h2>
+<p>
+게이트웨이는 PostgreSQL에 디바이스 로그인 플로우의 상태와 rate-limit 카운터를 저장한다. 지출 한도(spend limits) 기능을 사용하면 사용자별 지출, 감사 로그, 아이덴티티 테이블도 여기에 함께 저장된다. 게이트웨이가 재시작되어도 잃으면 안 되는 상태가 이 저장소에 담긴다. 접속 정보는 <code>postgres_url</code>에 지정하는데, ID·비밀번호를 포함한 접속 문자열(<code>postgres://사용자:비밀번호@호스트:포트/DB이름</code>) 전체가 <code>GATEWAY_POSTGRES_URL</code> 환경변수에 담긴다.
+</p>
+
+<div class="callout">
+<strong>"디바이스 로그인 플로우의 상태"란 진행 중인 로그인 시도의 중간 기록이다.</strong>
+CLI 로그인은 토큰을 기다리는 쪽(CLI)과 실제로 로그인하는 쪽(브라우저)이 분리돼 진행된다. 게이트웨이는 그 사이에 "어떤 CLI가 로그인을 기다리고 있고, 대응하는 브라우저 로그인이 끝났는지"를 기억해 둬야 하는데, 이 중간 기록이 바로 여기서 말하는 상태다. 로그인 시도를 식별하는 코드(<code>device_code</code>·<code>user_code</code>), 그 시도가 대기 중인지 완료됐는지, 코드가 언제 만료되는지 같은 값이 담긴다. 로그인 시작과 완료 사이에 시간 간격이 있고 그동안 게이트웨이가 재시작될 수도 있으므로, 이 값을 잃지 않도록 PostgreSQL에 저장한다. 이 흐름의 자세한 구조는 <a href="0004-device-auth-flow.html">Lesson 4</a>에서 다룬다.
+</div>
+
+<div class="callout">
+<strong>일반적인 rate-limit 동작 방식.</strong>
+rate limit(요청 횟수 제한)은 대체로 다음 절차로 동작한다. 요청이 들어오면 먼저 그 요청을 어떤 키(IP 주소, 사용자, 토큰 등)로 묶어 식별하고, 그 키에 해당하는 카운터를 하나 올린다. 그다음 "정해진 시간 창(예: 1분) 안에 카운터가 한도를 넘었는가"를 확인해, 넘지 않았으면 요청을 처리하고 넘었으면 거부한다(보통 HTTP 429 응답). 시간 창이 지나면 카운터는 리셋되거나 오래된 기록이 빠진다. 카운터를 메모리가 아니라 PostgreSQL 같은 공유 저장소에 두는 이유는, 게이트웨이가 재시작되거나 여러 대로 운영돼도 "이 키가 최근 몇 번 시도했는지"가 일관되게 유지돼야 제한이 우회되지 않기 때문이다. 다만 이 게이트웨이가 쓰는 정확한 시간 창·한도·알고리즘(고정 창, 슬라이딩 창, 토큰 버킷 등)은 이 문서에 명시돼 있지 않다.
+</div>
+
+<h2>upstreams — 요청의 최종 목적지</h2>
+<p>
+<code>upstreams</code>는 게이트웨이가 개발자를 대신해 호출할 모델 제공자 목록이다. 여러 개를 등록하면 failover 순서를 지정할 수 있고, 각 업스트림마다 어떤 자격증명을 쓸지(그 제공자에 인증할 수단, 예를 들어 Bedrock이면 AWS 자격증명)와 어떤 모델을 어떤 이름으로 노출할지(<code>auto_include_builtin_models</code> 또는 <code>models</code> 목록)를 정의한다. 이 자격증명은 <code>auth</code> 블록에 지정하는데, 위 예시의 <code>auth: {}</code>처럼 비워 두면 실행 환경이 제공하는 AWS 기본 자격증명 체인(예: 호스트에 부여된 IAM 역할)을 쓴다. 개발자 쪽 CLI는 업스트림 종류와 무관하게 항상 동일한 Anthropic Messages API 형식으로 요청을 보내고, 실제 형식 번역과 라우팅은 게이트웨이가 처리한다.
+</p>
+
+<h2>선택 블록 — models · managed · telemetry · admin</h2>
+<p>
+앞의 다섯 블록은 사인인 흐름에 필요한 최소 구성이다. 여기에 네 개의 선택 블록을 더하면 게이트웨이가 중앙화하는 나머지 기능 — 모델 노출 큐레이션, 정책 강제, 사용량 수집, 지출 한도 관리 — 이 켜진다. 각 블록의 동작은 다른 레슨에서 다루므로, 여기서는 <code>gateway.yaml</code>에 무엇을 적는지만 짧게 본다.
+</p>
+
+<h3>models — 노출할 모델 큐레이션</h3>
+<p>
+관리자가 큐레이션한 모델 목록으로, <code>/v1/models</code>로 노출되며 업스트림마다 모델 ID를 번역(translate)하는 데 쓰인다. <code>auto_include_builtin_models: true</code>이면 기본 카탈로그를 자동 노출하고, <code>false</code>이면 아래 <code>models</code> 목록에 적은 것만 노출한다. 각 모델 항목은 게이트웨이가 노출하는 <code>id</code>·표시명 <code>label</code>, 그리고 업스트림별 실제 모델 ID를 매핑하는 <code>upstream_model</code>로 이루어진다. 공식 문서 기준으로 이 블록은 비(非)미국 Amazon Bedrock 리전, Amazon Bedrock provisioned-throughput ARN, Microsoft Foundry 배포 이름을 쓸 때 필요하다.
+</p>
+<pre><code>auto_include_builtin_models: true   # false면 아래 목록만 노출
+models:
+  - id: claude-opus-4-8
+    label: Claude Opus 4.8
+    upstream_model:                 # 업스트림별 실제 모델 ID 매핑
+      anthropic: claude-opus-4-8
+      bedrock: us.anthropic.claude-opus-4-8   # 또는 inference-profile ARN</code></pre>
+<p>
+<code>upstream_model</code>의 각 키는 설정된 업스트림 이름(기본값은 provider 이름)과 일치해야 하며, 어느 업스트림과도 일치하지 않는 키가 있으면 게이트웨이가 부팅에 실패한다. 그래서 쓰지 않는 provider의 줄은 생략한다.
+</p>
+
+<h3>managed — 그룹별 정책 강제</h3>
+<p>
+IdP 그룹에 따라 다른 <strong>Managed Settings</strong>(모델 allowlist, 툴 권한, 환경변수 등)를 강제하는 블록이다. <code>policies</code>는 위에서 아래로 평가되며, <code>match</code>로 대상 그룹을 지정하고 <code>match: {}</code>는 나머지 전체에 적용되는 기본 정책이다. 아래는 임시 그룹에는 Haiku만 허용하고, 그 외 모두에게 세 모델을 허용하면서 <code>curl</code> 실행을 막는 예시다.
+</p>
+<pre><code>managed:
+  policies:
+    - match: { groups: [temporary-group] }
+      cli:
+        availableModels: [claude-haiku-4-5]
+    - match: {}                              # 나머지 전체
+      cli:
+        availableModels: [claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5]
+        permissions:
+          deny: ["Bash(curl *)"]             # curl 실행 차단</code></pre>
+<p>
+이 정책이 로그인·갱신 시점에 클라이언트로 전달되어 사용자 단위로 적용되는 과정은 <a href="0003-how-it-works.html">작동 방식</a> 3단계에서 다룬다.
+</p>
+
+<h3>telemetry — 사용량 수집·중계</h3>
+<p>
+게이트웨이가 로그인한 모든 클라이언트의 OTLP 텔레메트리(토큰 수, 요청 수, 지연 시간 등)를 모아 지정한 목적지로 중계하는 블록이다. 개발자마다 로컬에서 OTEL을 설정할 필요가 없어진다. <code>forward_to</code>에 목적지별 URL·헤더와 어떤 신호(metrics·logs)를 보낼지 지정한다.
+</p>
+<pre><code>telemetry:
+  forward_to:
+    - url: https://monitoring.&lt;region&gt;.amazonaws.com       # CloudWatch로 metrics
+      headers:
+        Authorization: Bearer ${CW_METRICS_API_KEY}
+      metrics: true
+      logs: false</code></pre>
+
+<h3>admin — 지출 한도 관리 API</h3>
+<p>
+사용자·그룹·조직 단위 지출 한도(spend limits)를 조정하는 Admin API를 여는 블록이다. <code>write_keys</code>는 한도 설정·삭제·조회가 모두 가능한 관리자용 키이고, <code>read_keys</code>는 조회만 가능한 모니터링용 키다. 이 키로 <code>/v1/organizations/spend_limits</code> 엔드포인트를 호출해 한도를 실시간 조정한다.
+</p>
+<pre><code>admin:
+  read_keys:
+    - { id: cli-reader, key: "${GATEWAY_ADMIN_READ_KEY}" }   # 조회 전용
+  write_keys:
+    - { id: cli-admin, key: "${GATEWAY_ADMIN_WRITE_KEY}" }   # 설정·삭제·조회</code></pre>
+
+<h2>확인 퀴즈</h2>
+<div class="quiz">
+<p class="q"><code>session.ttl_hours</code>를 늘리면 함께 늘어나는 값은?</p>
+<label><input type="radio" name="q1" value="a"> IdP discovery 주기</label>
+<label><input type="radio" name="q1" value="b" data-correct> IdP 비활성화 후 접근 차단까지 걸리는 최대 시간</label>
+<label><input type="radio" name="q1" value="c"> PostgreSQL 저장 용량</label>
+<div class="feedback" data-correct-text="정답입니다. TTL은 재로그인 빈도와 계정 비활성화 반영 지연 사이의 트레이드오프입니다." data-incorrect-text="session 블록의 ttl_hours 설명을 다시 확인하세요."></div>
+</div>
+
+<p class="source">
+출처: <a href="https://code.claude.com/docs/en/claude-apps-gateway" target="_blank">Claude apps gateway (공식 문서)</a>,
+<a href="https://code.claude.com/docs/en/claude-apps-gateway-deploy" target="_blank">Claude apps gateway deployment and operations (공식 문서)</a>
+</p>
+
+<div class="ask-agent">
+managed.policies나 telemetry 블록은 별도로 다룰 수 있습니다. 필요하면 요청하세요.
+</div>
+
+<div class="nav-links">
+<span><a href="0001-what-gateway-centralizes.html">&larr; 이전</a></span>
+<span><a href="0003-how-it-works.html">다음: 작동 방식 &rarr;</a></span>
+</div>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>4. 디바이스 인증 플로우 자세히</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<p class="kicker">Lesson 4 · 심화</p>
+<h1>디바이스 인증 플로우 자세히</h1>
+<p class="subtitle">리다이렉트되는 것은 CLI가 아니라 브라우저다.</p>
+
+<p>
+게이트웨이 로그인에서 가장 헷갈리는 지점은 "인증 안 된 요청이 IdP로 리다이렉트된다"는 웹 앱의 통념이 여기서는 맞지 않는다는 것이다. 게이트웨이는 <strong>디바이스 인증 플로우</strong>(RFC 8628 device authorization grant)를 쓰며, 여기서는 CLI(Claude Code)와 브라우저가 서로 다른 주체로 분리되어 각자 다른 일을 한다. 아래 다이어그램은 네 주체(CLI · 게이트웨이 · 브라우저 · IdP)가 시간 순으로 주고받는 것을 보여준다.
+</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 820 620" role="img" aria-label="디바이스 인증 플로우 시퀀스 다이어그램" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .actor { fill: #f4ece3; stroke: #8a4b2e; stroke-width: 1.5; }
+    .actorlbl { font-family: "Nanum Gothic", sans-serif; font-size: 14px; font-weight: 700; fill: #8a4b2e; }
+    .life { stroke: #c9c3b8; stroke-width: 1.5; stroke-dasharray: 4 4; }
+    .msg { stroke: #1e1e1e; stroke-width: 1.5; fill: none; marker-end: url(#ah2); }
+    .msg-dash { stroke: #1e1e1e; stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; marker-end: url(#ah2); }
+    .msglbl { font-family: "Nanum Gothic", sans-serif; font-size: 12px; fill: #1a1a1a; }
+    .poll { fill: #a5d8ff; stroke: #1e6fb8; stroke-width: 1.2; }
+    .polllbl { font-family: "Nanum Gothic", sans-serif; font-size: 11px; fill: #1e6fb8; }
+    .step { font-family: "D2Coding", monospace; font-size: 12px; font-weight: 700; fill: #8a4b2e; }
+  </style>
+  <defs>
+    <marker id="ah2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#1e1e1e"></path>
+    </marker>
+  </defs>
+
+  <!-- actor headers -->
+  <rect class="actor" x="40"  y="20" width="130" height="40" rx="6"></rect>
+  <text class="actorlbl" x="105" y="45" text-anchor="middle">CLI</text>
+  <rect class="actor" x="250" y="20" width="130" height="40" rx="6"></rect>
+  <text class="actorlbl" x="315" y="45" text-anchor="middle">게이트웨이</text>
+  <rect class="actor" x="460" y="20" width="130" height="40" rx="6"></rect>
+  <text class="actorlbl" x="525" y="45" text-anchor="middle">브라우저</text>
+  <rect class="actor" x="660" y="20" width="130" height="40" rx="6"></rect>
+  <text class="actorlbl" x="725" y="45" text-anchor="middle">IdP</text>
+
+  <!-- lifelines -->
+  <line class="life" x1="105" y1="60" x2="105" y2="600"></line>
+  <line class="life" x1="315" y1="60" x2="315" y2="600"></line>
+  <line class="life" x1="525" y1="60" x2="525" y2="600"></line>
+  <line class="life" x1="725" y1="60" x2="725" y2="600"></line>
+
+  <!-- 1: CLI -> Gateway device request -->
+  <text class="step" x="40" y="95">1</text>
+  <path class="msg" d="M105,105 L315,105"></path>
+  <text class="msglbl" x="210" y="98" text-anchor="middle">/login: 디바이스 인증 요청</text>
+
+  <!-- 2: Gateway -> CLI code+url -->
+  <text class="step" x="40" y="140">2</text>
+  <path class="msg" d="M315,150 L105,150"></path>
+  <text class="msglbl" x="210" y="143" text-anchor="middle">디바이스 코드 + 사용자 코드 + 확인 URL</text>
+
+  <!-- polling box on CLI lifeline -->
+  <rect class="poll" x="80" y="165" width="50" height="330" rx="4"></rect>
+  <text class="polllbl" x="105" y="335" text-anchor="middle" transform="rotate(-90 105 335)">polling: 로그인 끝났나요?</text>
+
+  <!-- 3: user opens URL in browser -->
+  <text class="step" x="40" y="205">3</text>
+  <path class="msg" d="M138,215 L525,215"></path>
+  <text class="msglbl" x="345" y="208" text-anchor="middle">개발자가 확인 URL을 브라우저에서 염</text>
+
+  <!-- 4: browser -> gateway open verification + submit user_code -->
+  <text class="step" x="40" y="250">4</text>
+  <path class="msg" d="M525,265 L315,265"></path>
+  <text class="msglbl" x="420" y="245" text-anchor="middle">확인 페이지 접근 +</text>
+  <text class="msglbl" x="420" y="259" text-anchor="middle">사용자 코드 입력 (device_code에 매핑)</text>
+
+  <!-- 5: gateway redirects browser to IdP authorization_endpoint -->
+  <text class="step" x="40" y="300">5</text>
+  <path class="msg" d="M315,310 L725,310"></path>
+  <text class="msglbl" x="520" y="290" text-anchor="middle">브라우저를 IdP authorization_endpoint로</text>
+  <text class="msglbl" x="520" y="304" text-anchor="middle">리다이렉트 (discovery로 미리 파악)</text>
+
+  <!-- 6: user logs in at IdP -->
+  <text class="step" x="40" y="350">6</text>
+  <path class="msg" d="M525,360 L725,360"></path>
+  <text class="msglbl" x="625" y="353" text-anchor="middle">IdP에서 로그인·승인</text>
+
+  <!-- 7: IdP redirects browser back to gateway callback -->
+  <text class="step" x="40" y="400">7</text>
+  <path class="msg" d="M725,410 L315,410"></path>
+  <text class="msglbl" x="520" y="403" text-anchor="middle">/oauth/callback 으로 되돌려보냄 (redirect_uri)</text>
+
+  <!-- 8: gateway mints session token, stores state -->
+  <text class="step" x="40" y="450">8</text>
+  <path class="msg" d="M315,460 L315,460"></path>
+  <rect class="actor" x="255" y="440" width="120" height="34" rx="6" style="fill:#b2f2bb;stroke:#2e6b47;"></rect>
+  <text class="msglbl" x="315" y="461" text-anchor="middle">세션 토큰 발급 + 상태 기록</text>
+
+  <!-- 9: CLI polling receives token -->
+  <text class="step" x="40" y="510">9</text>
+  <path class="msg-dash" d="M315,520 L130,520"></path>
+  <text class="msglbl" x="230" y="513" text-anchor="middle">다음 polling에서 세션 토큰 수령</text>
+
+  <!-- 10 result -->
+  <text class="step" x="40" y="560">10</text>
+  <rect class="actor" x="45" y="545" width="270" height="34" rx="6" style="fill:#ffd43b;stroke:#8a6a00;"></rect>
+  <text class="msglbl" x="180" y="566" text-anchor="middle">로그인 완료: 이후 세션 토큰으로만 통신</text>
+</svg>
+<figcaption>디바이스 인증 플로우. 파란 세로 막대는 CLI가 대기(polling)하는 구간, 점선 화살표는 그 polling에 대한 응답이다. 편집 가능한 원본: <a href="../assets/device-auth-flow.excalidraw">device-auth-flow.excalidraw</a>.</figcaption>
+</figure>
+
+<h2>단계별 설명</h2>
+
+<h3>1~2. CLI ↔ 게이트웨이: 디바이스 코드 발급</h3>
+<p>
+개발자가 <code>/login</code>을 실행하면 CLI가 게이트웨이에 디바이스 인증을 요청한다(1). 게이트웨이는 CLI가 polling에 쓸 <strong>디바이스 코드(<code>device_code</code>)</strong>, 개발자가 브라우저에 입력할 짧은 <strong>사용자 코드(<code>user_code</code>)</strong>, 그리고 <strong>확인용 URL(<code>verification_uri</code>)</strong>을 돌려준다(2). 여기서 CLI는 브라우저로 리다이렉트하지 않는다 — 이 점이 웹 앱 SSO와 다른 핵심이다. 일반 웹 앱은 접근 주체가 곧 브라우저라 서버가 그 브라우저를 바로 IdP로 리다이렉트하면 되지만, 터미널에서 실행되는 CLI에는 리다이렉트할 브라우저가 없다. 그래서 게이트웨이는 CLI에 위의 세 값만 돌려주고, CLI는 그 자리에서 대기하며 로그인이 끝나기를 기다린다(아래 polling callout 참고). 이렇게 CLI와 브라우저를 나누면 둘이 서로 다른 기기에서 실행되어도 되는 이점이 생기는데, 이는 문서 끝의 <a href="#why-split">"왜 CLI와 브라우저를 분리하는가"</a> callout에서 다룬다.
+</p>
+
+<div class="callout">
+<strong>2단계 응답에 담기는 값(RFC 8628).</strong>
+<code>device_code</code>는 CLI만 쓰는 값으로, 토큰 엔드포인트(CLI가 액세스 토큰을 받아가는 게이트웨이의 OAuth 주소)를 polling할 때 자신의 대기를 식별한다(개발자에게 노출되지 않는다). <code>user_code</code>는 사람이 브라우저 확인 페이지에 입력하는 값이라 짧고 읽기 쉬운 형태로 발급된다(Claude Apps Gateway는 20자 알파벳에서 뽑은 8자를 쓰고, 10분 뒤 만료된다). <code>verification_uri</code>는 그 <code>user_code</code>를 입력할 페이지 주소다. 이 밖에 코드 만료 시간(<code>expires_in</code>)과 polling 최소 간격(<code>interval</code>)도 함께 내려온다.
+</div>
+
+<div class="callout">
+<strong>polling. CLI는 대기만 한다.</strong>
+2단계 이후 CLI가 하는 일은 "로그인이 끝났는지"를 짧은 간격으로 게이트웨이에 계속 물어보는 것뿐이다(다이어그램의 파란 세로 막대). 실제 로그인은 아래 브라우저 구간에서 진행되고, CLI는 그 결과를 기다린다.
+</div>
+
+<h3>3~4. 브라우저: 확인 페이지 접근</h3>
+<p>
+개발자가 2단계에서 받은 확인 URL을 <strong>브라우저</strong>에서 연다(3). 브라우저가 게이트웨이의 확인 페이지에 접근하면(4), 개발자는 이 페이지에 2단계에서 받은 <strong>사용자 코드(<code>user_code</code>)</strong>를 입력한다.
+</p>
+<p>
+이때 두 코드의 역할이 갈린다. <code>device_code</code>는 <strong>CLI 쪽</strong>을 식별하는 값이라 CLI만 들고 토큰 엔드포인트 polling에 쓰고, 브라우저는 이 값을 갖고 있지 않다. <code>user_code</code>는 <strong>브라우저 쪽</strong>이 제출하는 값이다. 그래서 게이트웨이는 지금 마주한 이 브라우저 세션이 어느 CLI의 대기와 짝인지, 브라우저가 방금 제출한 <code>user_code</code>를 키로 저장된 디바이스 인증 레코드(PostgreSQL)를 조회해 알아낸다. 조회로 찾은 <code>device_code</code>가 그 짝이며, 이 연결을 통해 IdP 로그인이 끝난 결과가 올바른 CLI의 polling 응답으로 전달된다.
+</p>
+
+<h3>5. 게이트웨이 → IdP: 브라우저를 리다이렉트</h3>
+<p>
+게이트웨이가 <strong>브라우저</strong>를 IdP로 리다이렉트한다(5). 이때 목적지는 <code>issuer</code> URL 자체가 아니라, issuer가 서빙하는 discovery 문서(<code>/.well-known/openid-configuration</code>) 안에 적힌 <code>authorization_endpoint</code>다. 게이트웨이는 부팅 시 OIDC discovery로 이 주소를 미리 알아둔 상태다. 즉 <code>issuer</code>는 "실제 리다이렉트 주소를 찾아내는 출발점"이지, 그 자체가 목적지가 아니다.
+</p>
+
+<h3>"리다이렉트한다"는 것은 구체적으로 무엇인가</h3>
+<p>
+먼저 이 단계가 풀어야 하는 문제부터 보자. 게이트웨이 앞에 브라우저가 와 있지만(개발자가 확인 URL을 열었으니까), 게이트웨이는 이 사람을 로그인시킬 수 없다. 로그인은 회사 IdP만 할 수 있는 일이고, 게이트웨이는 그 사람의 비밀번호를 모르며 대신 입력해 줄 수도 없다. 그래서 게이트웨이가 할 수 있는 최선은 "당신을 로그인시켜 줄 곳은 IdP다, 그리로 가라"고 브라우저에게 알려주는 것뿐이다. 이 "알려주고 보내는" 동작이 리다이렉트다.
+</p>
+<p>
+여기서 "보낸다"의 의미가 중요하다. 게이트웨이가 브라우저를 손으로 밀어 IdP로 옮기는 것이 아니다. 브라우저와 서버는 "요청 → 응답"만 주고받으므로, 게이트웨이가 브라우저를 이동시키는 유일한 방법은 브라우저의 요청에 대해 <strong>"여기 말고 저 주소로 다시 가라"는 답</strong>을 돌려주는 것이다. 그 답을 받은 브라우저가 스스로 그 주소로 다시 요청을 보내면, 결과적으로 브라우저가 IdP로 이동한 셈이 된다. HTTP에는 이 답을 표현하는 표준이 있는데, 상태 코드 <code>302</code>와 목적지를 담는 <code>Location</code> 헤더다.
+</p>
+<pre><code>HTTP/1.1 302 Found
+Location: https://login.example.com/authorize?client_id=...&amp;redirect_uri=.../oauth/callback&amp;...</code></pre>
+<p>
+<code>Location</code>에 담긴 주소가 IdP의 authorization_endpoint이고, 뒤의 쿼리 파라미터에 "누가(client_id) 보냈고, 로그인 끝나면 어디로(redirect_uri) 돌려보내라"가 적힌다. 브라우저는 이 302 응답을 받으면 <code>Location</code>의 주소로 <strong>자동으로</strong> 새 요청을 보내며, 이는 브라우저에 내장된 기본 동작이라 개발자가 따로 할 일은 없다. 그 결과 화면에 IdP 로그인 페이지가 뜬다. 아래 그림은 이 두 동작을 나눠 보여준다.
+</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 260" role="img" aria-label="302 리다이렉트로 브라우저가 IdP로 이동하는 과정" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ah3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#1e1e1e"></path>
+    </marker>
+  </defs>
+  <style>
+    .n { stroke: #1e1e1e; stroke-width: 1.5; }
+    .n-br { fill: #a5d8ff; }
+    .n-gw { fill: #b2f2bb; }
+    .n-idp { fill: #ffd43b; }
+    .nlbl { font-family: "Nanum Gothic", sans-serif; font-size: 14px; font-weight: 700; fill: #1a1a1a; }
+    .e { stroke: #1e1e1e; stroke-width: 1.5; fill: none; marker-end: url(#ah3); }
+    .elbl { font-family: "Nanum Gothic", sans-serif; font-size: 12px; fill: #333; }
+    .mono { font-family: "D2Coding", monospace; font-size: 11px; fill: #8a4b2e; }
+  </style>
+
+  <rect class="n n-br" x="40" y="100" width="140" height="60" rx="8"></rect>
+  <text class="nlbl" x="110" y="135" text-anchor="middle">브라우저</text>
+  <rect class="n n-gw" x="280" y="100" width="140" height="60" rx="8"></rect>
+  <text class="nlbl" x="350" y="135" text-anchor="middle">게이트웨이</text>
+  <rect class="n n-idp" x="520" y="100" width="140" height="60" rx="8"></rect>
+  <text class="nlbl" x="590" y="135" text-anchor="middle">IdP</text>
+
+  <!-- 1: browser -> gateway -->
+  <path class="e" d="M180,118 L278,118"></path>
+  <text class="elbl" x="230" y="108" text-anchor="middle">① 요청</text>
+  <!-- 2: gateway -> browser 302 -->
+  <path class="e" d="M278,145 L182,145"></path>
+  <text class="elbl" x="230" y="172" text-anchor="middle">② 302 Found</text>
+  <text class="mono" x="230" y="188" text-anchor="middle">Location: …/authorize</text>
+  <!-- 3: browser -> IdP (자동) -->
+  <path class="e" d="M180,135 C300,240 420,240 518,140"></path>
+  <text class="elbl" x="350" y="235" text-anchor="middle">③ 브라우저가 Location 주소로 자동 이동</text>
+</svg>
+<figcaption>게이트웨이는 302+Location으로 목적지만 알려주고(②), 실제 이동은 브라우저가 수행한다(③). "게이트웨이가 브라우저를 리다이렉트한다"는 이 두 동작을 줄인 표현이다.</figcaption>
+</figure>
+
+<h3>6~7. IdP 로그인과 콜백</h3>
+<p>
+개발자가 IdP에서 로그인하고 승인(consent, 게이트웨이가 자신의 이메일·그룹 정보에 접근하는 것을 개발자 본인이 허가하는 단계)하면(6), IdP는 브라우저를 게이트웨이의 <code>/oauth/callback</code>으로 되돌려보낸다(7). 이 "되돌려보낸다"는 5단계와 정확히 같은 <code>302</code> 리다이렉트이고, 방향만 반대다. IdP가 브라우저를 직접 옮기는 것이 아니라, <code>Location</code> 헤더에 게이트웨이의 콜백 주소를 담은 <code>302</code> 응답을 브라우저에 돌려주고, 브라우저가 스스로 그 주소로 이동한다(<code>https://&lt;gateway&gt;/oauth/callback?code=...</code>처럼 인증 코드가 쿼리에 실린다). 이 콜백 주소가 바로 <code>public_url</code>을 기준으로 만들어지는 <strong>redirect_uri</strong>이며, 5단계에서 게이트웨이가 IdP로 미리 알려준 값이자 IdP에 등록해 둔 값과 정확히 일치해야 한다.
+</p>
+<div class="callout">
+<strong>redirect_uri를 왜 미리 등록하는가.</strong>
+IdP는 로그인이 끝나면 인증 코드를 <code>redirect_uri</code>로 돌려보낸다. 만약 IdP가 요청에 실려온 아무 주소로나 코드를 보낸다면, 공격자가 이 값을 자신의 서버로 바꿔 코드를 가로챌 수 있다. 그래서 IdP는 <strong>사전 등록된 값과 정확히 일치하는 주소에만</strong> 코드를 돌려보낸다. 이는 Claude Apps Gateway만의 요구가 아니라 OAuth 2.0의 표준 방어다. 게이트웨이를 ALB 뒤에 두면서 <code>public_url</code>을 내부 주소로 잘못 설정하면, IdP가 등록값과 다른 <code>redirect_uri</code>를 받아 콜백이 실패한다.
+</div>
+
+<p>
+그런데 7단계에서 콜백으로 오는 값은 사용자 신원 정보가 아니라 <strong>인증 코드(authorization code)</strong>다. 이 코드는 "이 사용자가 방금 로그인을 마쳤다"를 증명하는 일회용 교환권일 뿐, 사용자가 누구인지는 담겨 있지 않다. 게이트웨이는 이 코드를 다시 IdP의 토큰 엔드포인트에 제시해(이때 <code>PKCE</code>로 검증) 진짜 정보를 받아오는데, 이 교환은 브라우저를 거치지 않고 게이트웨이와 IdP가 직접 주고받는다. 이렇게 받는 정보는 두 가지다. 하나는 사용자 신원을 담은 <strong><code>id_token</code></strong>으로, 게이트웨이는 이 토큰을 검증한 뒤 이메일·이메일 검증 여부·소속 그룹을 꺼낸다(그룹 정보로 모델 allowlist와 managed settings 정책을 정한다). 다른 하나는 <strong>리프레시 토큰</strong>으로, 이후 세션이 만료될 때 개발자를 다시 브라우저 로그인시키지 않고 조용히 갱신하는 데 쓴다.
+</p>
+
+<div class="callout">
+<strong>PKCE: 코드를 가로채도 토큰으로 못 바꾸게 하는 장치.</strong>
+PKCE(Proof Key for Code Exchange)는 인증 코드 탈취를 무력화하는 OAuth 2.0 확장이다(RFC 7636). 한 쌍의 값을 쓰는데, <code>code_verifier</code>는 무작위 원본 비밀값이고 <code>code_challenge</code>는 그것을 SHA-256으로 해시한 값이다(해시라 되돌릴 수 없다). 이 플로우에서 OAuth 클라이언트 역할은 <strong>게이트웨이</strong>, 서버 역할은 <strong>IdP</strong>다.
+<br><br>
+<strong>① 발급(생성)</strong> — 로그인을 시작할 때 게이트웨이가 <code>code_verifier</code>를 만들고, 해시해 <code>code_challenge</code>를 만든다.
+<strong>② 사용</strong> — 게이트웨이가 authorization 요청에는 <code>code_challenge</code>(해시)만 실어 보내고, 나중에 코드를 토큰으로 교환할 때 원본 <code>code_verifier</code>를 제시한다. IdP가 이 원본을 해시해 앞서 받은 <code>code_challenge</code>와 일치하는지 검증하고, 일치해야만 토큰을 내준다.
+<strong>③ 저장</strong> — <code>code_verifier</code>(원본)는 게이트웨이가 로그인이 끝날 때까지만 임시 보관하고, <code>code_challenge</code>(해시)는 IdP가 인증 코드와 짝지어 보관한다. 브라우저에는 아무것도 저장되지 않는다.
+<br><br>
+그 결과 공격자가 브라우저 구간에서 인증 코드를 가로채도, 토큰 교환에 필요한 <code>code_verifier</code>는 게이트웨이만 갖고 있고 네트워크로 오간 적이 없어(오간 것은 되돌릴 수 없는 해시뿐) 코드만으로는 토큰을 받을 수 없다. (게이트웨이가 authorization-code 교환에 PKCE를 쓴다는 것은 공식 문서로 확인된 사실이고, verifier가 게이트웨이의 어느 저장소에 놓이는지 같은 구현 세부는 명시돼 있지 않다.)
+</div>
+
+<div class="callout">
+<strong>왜 코드를 먼저 받고 다시 교환하는가.</strong>
+사용자 신원 정보(<code>id_token</code>)를 처음부터 브라우저(URL)에 실어 보내면 브라우저 기록이나 로그에 남아 유출될 수 있다. 그래서 브라우저에는 의미 없는 일회용 코드만 실어 보내고, 실제 토큰은 게이트웨이가 IdP와 직접 교환한다. 여기에 <code>PKCE</code>까지 걸어, 코드가 중간에 탈취되더라도 검증값 없이는 토큰으로 바꿀 수 없게 한다. 게이트웨이와 IdP의 이 모든 통신은 표준 <strong>OpenID Connect(OIDC)</strong>의 authorization-code 플로우를 따른다(HTTPS 위에서 동작하며, SAML·LDAP은 지원하지 않는다).
+</div>
+
+<h3>8~10. 세션 확립</h3>
+<p>
+게이트웨이는 콜백으로 받은 인증 결과로 세션 토큰(JWT)을 발급하고 상태를 PostgreSQL에 기록한다(8). 그 다음 CLI의 polling 요청이 이 세션 토큰을 받아 대기를 끝낸다(9). 이제 로그인이 완료되어, 이후 CLI는 원본 IdP 자격증명 없이 이 세션 토큰만으로 게이트웨이와 통신한다(10). 여기까지가 최초 로그인 과정이며, 이후 세션 토큰이 만료됐을 때의 조용한 갱신·재로그인은 <a href="0003-how-it-works.html">Lesson 3</a> 5단계에서 다룬다.
+</p>
+
+<div class="callout" id="why-split">
+<strong>왜 CLI와 브라우저를 분리하는가.</strong>
+이렇게 나누면 CLI가 실행되는 기기와 브라우저가 실행되는 기기가 서로 달라도 된다. 예를 들어 SSH로 접속한 원격 서버에서 <code>/login</code>을 실행하고(CLI 구간), 확인 URL은 자신의 노트북 브라우저에서 여는(브라우저 구간) 구성이 가능하다. 웹 앱식 리다이렉트였다면 CLI가 실행되는 기기에 브라우저가 있어야 했을 것이다.
+</div>
+
+<div class="callout">
+<strong>디바이스 인증은 "또 하나의 인증"이 아니라 조율 장치다.</strong>
+디바이스 인증은 사용자가 누구인지 확인하는 보안 단계가 아니다. 실제 신원 확인은 전적으로 IdP 로그인이 담당한다. 그렇다면 두 단계를 두는 이유는 무엇인가. 일반 웹 앱은 접근하는 주체가 곧 브라우저라 그 브라우저를 바로 IdP로 리다이렉트하면 되지만, CLI에는 리다이렉트할 브라우저가 없다. 그래서 토큰을 받으려는 주체(CLI)와 실제로 로그인하는 주체(브라우저)를 분리해야 하고, 분리하고 나면 "브라우저에서 끝난 로그인 결과를 어느 CLI의 대기에 건네줄 것인가"라는 연결 문제가 생긴다. <code>device_code</code>(CLI가 자신을 식별)와 <code>user_code</code>(브라우저 로그인을 그 CLI 요청에 연결)가 바로 이 둘을 같은 로그인 시도로 묶는 역할을 한다. 즉 디바이스 인증은 인증을 한 번 더 하는 것이 아니라, 서로 다른 두 채널을 이어주는 조율 장치다.
+</div>
+
+<div class="callout">
+<strong>다만 보안 기여가 전혀 없는 것은 아니다.</strong>
+디바이스 확인 페이지는 same-origin POST만 허용하고 IP당 rate limit을 걸어(RFC 8628 §5.1), 짧은 <code>user_code</code>를 무차별 대입으로 알아맞히는 공격을 막는다. 하지만 이는 확인 코드가 추측당하지 않게 하는 부수적 방어일 뿐, 사용자 신원 확인 자체는 아니다.
+</div>
+
+<div class="quiz">
+<p class="q">브라우저에서 끝난 로그인 결과가 올바른 CLI의 대기(polling)로 전달되는 것은 무엇 덕분인가?</p>
+<label><input type="radio" name="q1" value="a"> CLI가 브라우저로 리다이렉트되기 때문</label>
+<label><input type="radio" name="q1" value="b" data-correct> 개발자가 입력한 <code>user_code</code>가 CLI의 <code>device_code</code>에 매핑되기 때문</label>
+<label><input type="radio" name="q1" value="c"> 세션 토큰(JWT)이 브라우저와 CLI에서 동일하게 발급되기 때문</label>
+<div class="feedback" data-correct-text="정답입니다. user_code가 게이트웨이에 저장된 디바이스 인증 레코드를 조회해 device_code에 매핑하고, 이 매핑으로 두 채널이 같은 로그인 시도로 묶입니다." data-incorrect-text="3~4단계와 '조율 장치' callout을 다시 확인하세요. 디바이스 인증은 두 채널을 이어주는 장치입니다."></div>
+</div>
+
+<p class="source">
+출처: <a href="https://code.claude.com/docs/en/claude-apps-gateway" target="_blank">Claude apps gateway (공식 문서)</a>,
+<a href="https://code.claude.com/docs/en/claude-apps-gateway-deploy" target="_blank">Claude apps gateway deployment and operations (공식 문서)</a>
+</p>
+
+<div class="ask-agent">
+authorization_endpoint, redirect_uri, discovery 문서 사이의 관계를 더 파고들고 싶으면 질문하세요.
+</div>
+
+<div class="nav-links">
+<span><a href="0003-how-it-works.html">&larr; 이전</a></span>
+<span>마지막 레슨입니다</span>
+</div>
+
+</div>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>
