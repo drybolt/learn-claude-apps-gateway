@@ -67,6 +67,7 @@ Client VPN 엔드포인트는 <strong>RSA 1024/2048비트 키만</strong> 지원
 <ol>
 <li><strong>클라이언트 CIDR</strong> — <a href="self-guide-aws.html">단계 0</a>의 값 <code>172.16.0.0/22</code>. VPC CIDR과 겹치지 않고, <code>/22</code> 이상이어야 한다.</li>
 <li><strong>인증: mutual TLS</strong> — 서버 인증서 ARN(2단계)을 지정한다. 클라이언트 인증서 ARN도 같은 서버 인증서 ARN을 쓰면 된다(같은 CA 발급).</li>
+<li><strong><code>Enable split-tunnel</code>을 체크한다.</strong> 기본값(꺼짐)으로 두면 풀 터널이 되어, 랩탑의 인터넷 목적지 트래픽(Cognito 로그인 화면 등)까지 전부 VPN으로 잡힌다. 이 엔드포인트의 Authorization rule·route table은 VPC CIDR만 허용하므로, 풀 터널 상태에서는 그 인터넷 트래픽이 조용히 드롭돼 <strong>디바이스 인증 코드를 입력해도 반응이 없는 증상</strong>으로 나타난다(아래 5단계 callout에 상세 설명). 생성 화면에서 놓쳤다면 <em>Actions → Modify client VPN endpoint</em>에서 나중에 켤 수 있지만, 그 경우 <strong>기존 연결을 끊고 재연결</strong>해야 새 라우팅이 반영된다.</li>
 <li><strong>연결 로그</strong> — 테스트면 비활성화해도 된다.</li>
 </ol>
 
@@ -103,27 +104,66 @@ client1.domain.tld.key 파일 내용
 <div class="callout">
 <strong>split-tunnel은 앱이 아니라 엔드포인트 설정이다.</strong>
 split-tunnel을 켜면 엔드포인트 route table의 경로(여기서는 VPC <code>10.0.0.0/16</code>)만 랩탑으로 push돼 그 대상만 VPN을 타고, 나머지 인터넷 트래픽은 로컬로 나간다. 켜지 않으면 기본값(full-tunnel)이라 랩탑의 <code>0.0.0.0/0</code> 전 트래픽이 VPN으로 흐른다. 이 옵션은 <strong>3단계의 엔드포인트 생성 화면</strong>(또는 <em>Actions → Modify client VPN endpoint</em>)에서 켠다 — AWS VPN Client 앱에는 이 토글이 없다. 실습에서는 켜 두기를 권장한다.
+<br><br>
+빠뜨렸을 때 실제로 나타나는 증상: <code>nslookup</code>은 정상 동작하고(VPC 대상 트래픽이라 문제없음) VPN도 <strong>Connected</strong>로 표시되며, 게이트웨이의 디바이스 인증 화면도 정상적으로 열린다. 다만 코드를 제출하면 게이트웨이가 Cognito(퍼블릭 인터넷) 로그인 화면으로 리다이렉트를 지시하는데, 그 트래픽이 풀 터널에 잡혀 인터넷으로 나가지 못하고 조용히 드롭된다 — 그래서 <strong>브라우저가 그냥 멈춘 것처럼 보인다</strong>. 게이트웨이 로그에는 <code>device.verify</code>가 <code>result: "redirect"</code>로 정상 응답한 기록만 남아, 게이트웨이 자체는 문제가 없다는 것을 보여준다.
 </div>
 
 <h2>6 · 접속 확인</h2>
 <p>
-VPN 연결 후, 게이트웨이 hostname이 <strong>사설 IP로 풀리는지</strong> 확인한다. 이게 되면 실습 가이드 단계 7의 로그인 테스트로 넘어간다.
+<strong>AWS VPN Client 앱</strong>(5단계에서 <code>.ovpn</code> 프로파일로 연결한 그 데스크톱 앱)에 표시되는 <strong>Connected</strong>는 <strong>OpenVPN 제어 채널(control channel)이 열렸다</strong>는 것만 뜻한다. 구체적으로는 클라이언트와 엔드포인트 사이의 mutual TLS 핸드셰이크가 성공하고, 데이터 채널(data channel)이 협상되어, 랩탑이 클라이언트 CIDR(<code>172.16.0.0/22</code>)에서 IP를 할당받은 상태다. 여기까지는 <strong>인증서와 TLS 계층</strong>이 정상이라는 의미일 뿐, 그 위로 실제 트래픽이 목적지까지 전달되는지는 보장하지 않는다.
 </p>
-<pre><code>nslookup &lt;gateway-hostname&gt;
+<p>
+데이터 평면(data plane)의 전달은 별개의 세 조건에 달려 있고, 이들은 Connected 여부와 무관하게 실패할 수 있다: ① 엔드포인트의 <strong>route table</strong>에 목적지 CIDR로 가는 경로가 있어 클라이언트에 push되는지, ② <strong>Authorization rule</strong>이 그 목적지 CIDR을 허용하는지, ③ 엔드포인트가 <strong>DNS 서버(<code>10.0.0.2</code>)를 클라이언트에 push</strong>하는지. 이 중 하나라도 빠지면 Connected 상태에서도 질의·연결이 조용히 실패한다. 그래서 아래를 순서대로 확인한다.
+</p>
+
+<h3>6-1 · 랩탑이 VPN IP를 받았는지</h3>
+<p>클라이언트 CIDR(<code>172.16.0.0/22</code>)에서 주소를 받았는지 확인한다.</p>
+<pre><code>ifconfig | grep 172.16       # macOS · Linux
+# → utun 인터페이스에 172.16.x.x 가 보이면 정상</code></pre>
+
+<h3>6-2 · 게이트웨이 Task 배포 전 — private zone까지 경로가 살아 있는지</h3>
+<p>
+게이트웨이 hostname의 A 레코드는 <strong>게이트웨이 Task 배포 후</strong>(실습 가이드 단계 5) 사설 IP로 채운다. 아직 A 레코드가 없어도, 단계 2에서 만든 private hosted zone에는 <strong>SOA 레코드가 기본으로 존재</strong>한다. 이걸 조회하면 <em>DNS 서버 지정(<code>10.0.0.2</code>) + private zone이 VPC에 연결됨 + VPC로 트래픽이 도달함</em>을 한 번에 검증할 수 있다.
+</p>
+<pre><code>nslookup -type=SOA internal.example.com 10.0.0.2
+# internal.example.com = 게이트웨이 hostname 전체가 아니라 그 부모 도메인(zone 이름)
+# → ns-...awsdns... 형태의 SOA 가 나오면 경로가 완전히 살아 있는 것</code></pre>
+<div class="callout">
+<strong>Resolver(<code>10.0.0.2</code>)는 ping에 응답하지 않는다.</strong>
+Resolver는 DNS 질의에만 응답하고 ICMP에는 응답하지 않으므로 <code>ping 10.0.0.2</code>로는 확인할 수 없다. 위 SOA 질의가 <code>10.0.0.2</code>를 통해 응답을 받는 것 자체가 Authorization rule과 라우팅이 동작한다는 증거다.
+</div>
+
+<h3>6-3 · 게이트웨이 Task 배포 후 — 사설 IP로 풀리는지 (최종 확인)</h3>
+<p>
+단계 5에서 A 레코드를 채운 뒤, 게이트웨이 hostname <strong>전체</strong>가 사설 IP로 풀리는지 확인한다. 이게 되면 실습 가이드 단계 7의 로그인 테스트로 넘어간다.
+</p>
+<pre><code>nslookup claude-gw.internal.example.com
+# claude-gw.internal.example.com = 단계 0에서 정한 hostname (zone 이름 + 레코드 이름 claude-gw)
 # → 10.0.x.x 사설 IP가 나와야 정상</code></pre>
 
 <div class="callout">
 <strong>막히면 여기부터.</strong>
 <ul>
-<li><strong>hostname이 사설 IP로 안 풀림</strong> → 4단계의 DNS 서버 지정, 그리고 private hosted zone의 A 레코드(실습 가이드 단계 5에서 채움)를 확인한다.</li>
-<li><strong>연결은 됐는데 게이트웨이에 접근 불가</strong> → Authorization rule에 VPC CIDR 허용이 있는지, gateway 보안 그룹이 클라이언트 CIDR의 443을 허용하는지 확인한다.</li>
-<li><strong>연결 자체가 실패</strong> → <code>.ovpn</code>에 클라이언트 인증서·키를 넣었는지, ACM 서버 인증서가 us-east-1에 있는지 확인한다.</li>
+<li><strong>앱은 Connected인데 <code>nslookup</code>이 <code>connection timed out; no servers could be reached</code></strong> → VPC 안으로 트래픽이 도달하지 못하고 있다. 다음을 순서대로 확인한다.
+  <ol>
+  <li><strong>DNS 서버를 명시해 다시 질의한다</strong> — <code>nslookup -type=SOA internal.example.com 10.0.0.2</code>. 이건 응답하는데 서버 없이 던진 질의만 실패하면, 랩탑에 DNS <code>10.0.0.2</code>가 push되지 않은 것이다(엔드포인트 DNS 미지정, 4단계 확인).</li>
+  <li><strong>VPC CIDR로 가는 경로가 있는지</strong> — <code>netstat -rn | grep '10\.0'</code>. <code>10.0.0.0/16</code>이 utun 인터페이스로 잡혀 있어야 한다. 없으면 split-tunnel 엔드포인트 route table에 VPC 경로가 없는 것이다(5단계 callout).</li>
+  <li><strong>Authorization rule이 있는지 (이 증상의 가장 흔한 원인)</strong> — 엔드포인트의 <em>Authorization rules</em> 탭에 VPC CIDR(<code>10.0.0.0/16</code>) 허용이 있어야 한다. 없으면 Connected여도 VPC 내부로 가는 모든 트래픽(<code>10.0.0.2</code> 포함)이 조용히 드롭돼 정확히 이 타임아웃이 난다(4단계 Authorization rule).</li>
+  </ol>
+</li>
+<li><strong>SOA·서버는 응답하는데 hostname이 사설 IP로 안 풀림</strong> → private hosted zone의 A 레코드(실습 가이드 단계 5에서 채움)가 아직 없거나 이름이 틀린 것이다. zone 이름 + 레코드 이름 <code>claude-gw</code>가 합쳐져 완성 이름이 되는지 확인한다.</li>
+<li><strong>이름은 풀리는데 게이트웨이에 접근 불가</strong> → gateway 보안 그룹이 postgres SG를 잘못 재사용하고 있지 않은지, 실제로 클라이언트 CIDR의 443을 허용하는지 확인한다. 보안 그룹은 맞는데 <code>ECONNREFUSED</code>가 나면 게이트웨이의 <code>listen.port</code>가 443인지 확인한다.</li>
+<li><strong>연결·DNS·SG는 다 정상인데 디바이스 인증 코드 입력 후 반응 없음</strong> → split-tunnel이 꺼져 있어 Cognito(인터넷) 트래픽이 드롭되는 경우다. 위 5단계 callout대로 split-tunnel을 켜고 재연결한다.</li>
+<li><strong>연결 자체가 실패(Connected가 안 뜸)</strong> → <code>.ovpn</code>에 클라이언트 인증서·키를 넣었는지, ACM 서버 인증서가 us-east-1에 있는지 확인한다.</li>
 </ul>
 </div>
 
 <p class="source">
 출처: <a href="https://docs.aws.amazon.com/vpn/latest/clientvpn-admin/cvpn-getting-started.html" target="_blank">Get started with AWS Client VPN (공식 문서)</a>,
 <a href="https://docs.aws.amazon.com/vpn/latest/clientvpn-admin/mutual.html" target="_blank">Mutual authentication in AWS Client VPN (공식 문서)</a>
+</p>
+<p>
+이 문서의 설정을 실제로 적용하며 마주친 문제(split-tunnel 누락, 보안 그룹 재사용)는 <a href="troubleshooting-log.html">트러블슈팅 로그</a>에 순서대로 기록돼 있다.
 </p>
 
 <div class="ask-agent">

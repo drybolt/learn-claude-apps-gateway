@@ -13,26 +13,26 @@
 <p class="subtitle">gateway.yaml을 이루는 핵심 다섯 블록과 네 개의 선택 블록.</p>
 
 <p>
-게이트웨이의 동작은 <code>gateway.yaml</code> 설정 파일 하나로 정의된다. 이 파일은 다섯 개의 최상위 블록으로 구성되며, 각 블록은 뚜렷하게 구분되는 역할을 맡는다. <code>listen</code>과 <code>oidc</code>는 누가 들어오는지를, <code>session</code>과 <code>store</code>는 들어온 뒤 상태를 어떻게 유지하는지를, <code>upstreams</code>는 요청이 최종적으로 어디로 가는지를 담당한다. 아래는 공식 문서의 최소 예시로, 사인인 흐름이 동작하는 데 필요한 다섯 블록만 담았다(나머지 옵션은 기본값을 쓴다). 이어지는 절에서 이 다섯 블록을 하나씩 설명하고, 마지막에 모델 노출·정책·텔레메트리·지출 한도를 켜는 네 개의 선택 블록(<code>models</code>·<code>managed</code>·<code>telemetry</code>·<code>admin</code>)을 덧붙인다.
+게이트웨이의 동작은 <code>gateway.yaml</code> 설정 파일 하나로 정의된다. 이 파일은 다섯 개의 최상위 블록으로 구성되며, 각 블록은 뚜렷하게 구분되는 역할을 맡는다. <code>listen</code>과 <code>oidc</code>는 누가 들어오는지를, <code>session</code>과 <code>store</code>는 들어온 뒤 상태를 어떻게 유지하는지를, <code>upstreams</code>는 요청이 최종적으로 어디로 가는지를 담당한다. 아래는 공식 문서의 최소 예시로, 사인인(sign-in) 흐름이 동작하는 데 필요한 다섯 블록만 담았다(나머지 옵션은 기본값을 쓴다). 이어지는 절에서 이 다섯 블록을 하나씩 설명하고, 마지막에 모델 노출·정책·텔레메트리·지출 한도를 켜는 네 개의 선택 블록(<code>models</code>·<code>managed</code>·<code>telemetry</code>·<code>admin</code>)을 덧붙인다.
 </p>
 <pre><code>listen:
   host: 0.0.0.0
-  port: 8080
+  port: 443
   # 개발자·브라우저가 접근하는 외부 주소. 사설 IP로 resolve되어야 한다.
-  public_url: https://claude-gateway.internal.example.com
+  public_url: https://claude-gw.internal.example.com
 
 oidc:                                    # 어떤 IdP로 로그인시킬지
-  issuer: https://login.example.com
-  client_id: 0oa1example2
+  issuer: https://cognito-idp.us-east-1.amazonaws.com/&lt;pool-id&gt;
+  client_id: &lt;cognito-app-client-id&gt;
   client_secret: ${OIDC_CLIENT_SECRET}   # 값이 아니라 환경변수를 참조
-  allowed_email_domains: [example.com]   # 조직 외부 계정 차단
+  allowed_email_domains: [&lt;your-domain&gt;]   # 조직 외부 계정 차단
 
 session:                                 # 발급할 세션 토큰
   jwt_secret: ${GATEWAY_JWT_SECRET}
   ttl_hours: 1                           # 토큰 유효 기간(기본 1시간)
 
 store:                                   # 로그인 상태를 담는 DB
-  postgres_url: ${GATEWAY_POSTGRES_URL}
+  postgres_url: ${GATEWAY_POSTGRES_URL}  # postgres://user:pass@postgres.claude-gw.local:5432/gateway
 
 upstreams:                               # 실제 모델을 호출할 대상
   - provider: bedrock
@@ -96,10 +96,10 @@ upstreams:                               # 실제 모델을 호출할 대상
 
 <h2>listen — 서버의 주소</h2>
 <p>
-이 블록은 성격이 다른 두 종류의 주소를 담는다. <code>host</code>·<code>port</code>는 게이트웨이 프로세스가 자기 호스트의 어느 인터페이스·포트에 바인딩할지를 정하는 <em>내부 바인딩 주소</em>이고, <code>public_url</code>은 바깥에서 그 서버를 어떤 이름으로 부르는지를 정하는 <em>외부 접근 주소</em>다. 둘을 나누어 두는 이유는 서버가 실제로 앉아 있는 자리와 외부에 노출되는 주소가 대개 다르기 때문이다.
+이 블록은 성격이 다른 두 종류의 주소를 담는다. <code>host</code>·<code>port</code>는 게이트웨이 프로세스가 자기 호스트의 어느 인터페이스·포트에 바인딩할지를 정하는 <em>내부 바인딩 주소</em>이고, <code>public_url</code>은 바깥에서 그 서버를 어떤 이름으로 부르는지를 정하는 <em>외부 접근 주소</em>다.
 </p>
 <p>
-<code>host</code>와 <code>port</code>는 게이트웨이 프로세스가 내부적으로 바인딩하는 주소다. 여기서 바인딩(binding)은 게이트웨이 프로세스가 운영체제로부터 특정 네트워크 인터페이스와 포트 번호를 할당받아, 그 조합으로 들어오는 TCP 연결만 수신하도록 소켓을 여는 동작이다. 예시의 <code>host: 0.0.0.0</code>은 특정 인터페이스 하나가 아니라 그 호스트의 모든 네트워크 인터페이스에서 연결을 받겠다는 의미이고(반대로 <code>127.0.0.1</code>로 두면 같은 호스트 내부의 요청만 받는다), <code>port: 8080</code>은 그 인터페이스에서 8080번 포트를 점유한다는 뜻이다. 이 값은 게이트웨이 프로세스가 자기 호스트의 어느 인터페이스·포트에 바인딩할지를 정할 뿐, 외부에서 그 주소로 도달 가능한지는 방화벽·리버스 프록시·DNS 같은 바깥 계층이 따로 결정한다.
+<code>host</code>·<code>port</code>는 게이트웨이 프로세스가 운영체제로부터 특정 인터페이스·포트를 할당받아 그 조합으로 들어오는 TCP 연결만 받도록 소켓을 여는 바인딩(binding) 값이다. <code>host: 0.0.0.0</code>은 모든 네트워크 인터페이스에서 연결을 받는다는 뜻이고(<code>127.0.0.1</code>이면 같은 호스트 내부 요청만 받는다), <code>port: 443</code>은 그 인터페이스의 443번 포트를 점유한다는 뜻이다. 다만 이 값은 바인딩 위치를 정할 뿐, 외부에서 실제로 도달 가능한지는 방화벽·리버스 프록시·DNS가 별도로 결정한다.
 </p>
 <p>
 <code>public_url</code>은 개발자와 브라우저가 실제로 접근하는 외부 주소다. 게이트웨이가 IdP로 로그인 요청을 보낼 때 전달하는 redirect_uri(로그인 후 브라우저를 되돌려 받을 주소)도 이 값을 기준으로 게이트웨이가 생성하므로, 내부 바인딩 주소가 아니라 외부에서 도달하는 주소와 일치해야 한다. 실제 운영에서는 리버스 프록시나 로드밸런서가 이 외부 주소로 들어온 요청을 받아, 내부 바인딩 주소인 <code>host</code>:<code>port</code>로 전달한다. 따라서 이 블록은 서버 자신이 어디에 있는지와 외부에서 어떻게 불리는지를 분리해서 표현한다.
@@ -107,17 +107,17 @@ upstreams:                               # 실제 모델을 호출할 대상
 
 <h2>oidc — 로그인 연동</h2>
 <p>
-<code>issuer</code>는 <code>/.well-known/openid-configuration</code>을 서빙하는 IdP 주소다. 게이트웨이는 이 표준 OIDC discovery를 통해 IdP와의 통신 방식을 스스로 알아낸다. <code>client_id</code>와 <code>client_secret</code>은 IdP에 미리 등록해 둔 OAuth 애플리케이션의 자격증명이고, <code>allowed_email_domains</code>는 조직 외부 계정의 로그인을 막는 1차 필터다. IdP에 따라 <code>id_token</code>에 이메일이나 그룹 정보를 담지 않는 경우가 있는데, 이때는 <code>userinfo_fallback: true</code>를 설정해 userinfo 엔드포인트에서 해당 정보를 보완해 가져온다.
+<code>issuer</code>는 <code>/.well-known/openid-configuration</code>을 서빙하는 IdP 주소다. 게이트웨이는 이 표준 OIDC discovery를 통해 IdP와의 통신 방식을 스스로 알아낸다. <code>client_id</code>와 <code>client_secret</code>은 게이트웨이를 IdP에 OAuth 애플리케이션으로 등록할 때 IdP가 발급하는 자격증명이고, <code>allowed_email_domains</code>는 조직 외부 계정의 로그인을 막는 1차 필터다. 개발자가 IdP에서 로그인을 마치면 IdP는 <code>id_token</code>을 발급하는데, IdP에 따라 여기에 이메일이나 그룹 정보를 담지 않는 경우가 있다. 이때는 <code>userinfo_fallback: true</code>를 설정해 userinfo 엔드포인트에서 해당 정보를 보완해 가져온다.
 </p>
 
 <div class="callout">
-<strong>issuer 하나만 적으면 나머지는 자동으로 발견된다.</strong>
-설정 파일에는 IdP의 기본 주소 하나만 <code>issuer</code>에 적으면 되고, 로그인에 필요한 세부 주소(로그인 페이지, 인증 결과를 받는 엔드포인트, 토큰 서명 검증용 키의 위치)는 게이트웨이가 직접 알아낸다. <code>/.well-known/openid-configuration</code>은 OIDC(OpenID Connect, 표준 로그인 규격) 표준이 정한 고정 경로이고, 표준을 따르는 IdP는 이 경로로 요청이 오면 자기 설정 정보를 JSON으로 돌려준다("서빙한다"). 즉 <code>issuer: https://login.example.com</code>이라고 적으면 게이트웨이는 <code>https://login.example.com/.well-known/openid-configuration</code>에 접속해 그 IdP의 로그인 관련 주소와 키 정보를 한 번에 받아온다. 개발자가 이 세부 항목을 일일이 설정 파일에 적을 필요가 없다. 이 과정을 OIDC discovery라 부른다.
+<strong>issuer만 적으면, 나머지 로그인 관련 주소는 게이트웨이가 자동으로 알아낸다.</strong>
+설정 파일에는 IdP의 기본 주소 하나만 <code>issuer</code>에 적으면 되고, 로그인에 필요한 세부 주소(로그인 페이지, 인증 결과를 받는 엔드포인트, 토큰 서명 검증용 키의 위치)는 게이트웨이가 직접 알아낸다. <code>/.well-known/openid-configuration</code>은 OIDC(OpenID Connect, 표준 로그인 규격) 표준이 정한 고정 경로이고, 표준을 따르는 IdP는 이 경로로 요청이 오면 자기 설정 정보를 JSON으로 돌려준다. 즉 <code>issuer: https://login.example.com</code>이라고 적으면 게이트웨이는 <code>https://login.example.com/.well-known/openid-configuration</code>에 접속해 그 IdP의 로그인 관련 주소와 키 정보를 한 번에 받아온다. 개발자가 이 세부 항목을 일일이 설정 파일에 적을 필요가 없다. 이 과정을 OIDC discovery라 부른다.
 </div>
 
 <div class="callout">
 <strong>client_id·client_secret은 IdP가 발급한다.</strong>
-이 두 값은 게이트웨이가 스스로 만드는 것이 아니라 IdP가 내어 주는 값이다. 게이트웨이를 IdP에 연동하려면 먼저 IdP 관리 콘솔에서 게이트웨이를 하나의 OAuth 애플리케이션(클라이언트)으로 등록해야 하고, 등록을 마치면 IdP가 그 애플리케이션을 식별하는 공개 ID(<code>client_id</code>)와 그 애플리케이션임을 증명하는 비밀 키(<code>client_secret</code>)를 발급한다. 관리자는 이 두 값을 받아 <code>gateway.yaml</code>에 적는다. 앞서 나온 <code>redirect_uri</code>와는 발급 주체가 반대다. <code>redirect_uri</code>는 게이트웨이가 IdP로 요청을 보낼 때 생성해 전달하는 값이고, <code>client_id</code>·<code>client_secret</code>은 IdP가 게이트웨이에 발급해 주는 값이다.
+이 두 값은 게이트웨이가 스스로 만드는 것이 아니라 IdP가 발급하는 값이다. 게이트웨이를 IdP에 연동하려면 먼저 IdP 관리 콘솔에서 게이트웨이를 하나의 OAuth 애플리케이션(클라이언트)으로 등록해야 하고, 등록을 마치면 IdP가 그 애플리케이션을 식별하는 공개 ID(<code>client_id</code>)와 그 애플리케이션임을 증명하는 비밀 키(<code>client_secret</code>)를 발급한다. 관리자는 이 두 값을 받아 <code>gateway.yaml</code>에 적는다. 앞서 나온 <code>redirect_uri</code>와는 발급 주체가 반대다. <code>redirect_uri</code>는 게이트웨이가 IdP로 요청을 보낼 때 생성해 전달하는 값이고, <code>client_id</code>·<code>client_secret</code>은 IdP가 게이트웨이에 발급해 주는 값이다.
 </div>
 
 <div class="callout">
@@ -127,7 +127,7 @@ upstreams:                               # 실제 모델을 호출할 대상
 
 <h2>session — 로그인 이후의 신원 증명</h2>
 <p>
-로그인이 끝나면 게이트웨이는 자체 세션 토큰(JWT)을 발급한다. <code>jwt_secret</code>은 이 토큰에 서명하는 비밀값이고, <code>ttl_hours</code>는 토큰의 유효 기간을 정한다. 이 유효 기간은 재로그인 빈도와 접근 회수 반영 속도라는 두 가지를 동시에 결정한다. 값을 크게 하면 개발자가 재로그인하는 빈도는 줄어들지만, IdP에서 계정을 비활성화했을 때 그것이 반영되어 접근이 끊기기까지의 지연은 길어진다. 즉 이 둘은 한쪽을 개선하면 다른 쪽이 나빠지는 트레이드오프 관계다.
+로그인이 끝나면(즉 IdP가 발급한 <code>id_token</code>을 게이트웨이가 검증하고 나면) 게이트웨이는 자체 세션 토큰(JWT)을 발급해, 로그인을 시작한 CLI가 대기 중이던 polling 응답에 실어 돌려준다. 이 전달 과정의 자세한 흐름은 <a href="0004-device-auth-flow.html">Lesson 4</a>에서 다룬다. <code>jwt_secret</code>은 이 토큰에 서명하는 비밀값이고, <code>ttl_hours</code>는 토큰의 유효 기간을 정한다. 이 값을 크게 하면 재로그인 빈도는 줄지만, IdP에서 계정을 비활성화한 뒤 접근이 끊기기까지의 지연은 길어지는 트레이드오프가 있다.
 </p>
 
 <div class="callout">
@@ -138,6 +138,8 @@ JWT(JSON Web Token)는 "누가 로그인했는가, 언제 만료되는가" 같�
 <div class="callout">
 <strong>클라이언트(Claude Code CLI) 쪽에서 이 토큰은 어떻게 쓰이는가.</strong>
 session 블록은 게이트웨이가 토큰을 발급·검증하는 서버 쪽을 다루지만, 그 토큰을 실제로 들고 다니는 것은 클라이언트인 Claude Code CLI다. 클라이언트 관점의 흐름은 세 단계다. 첫째, 로그인이 끝나면 CLI는 게이트웨이가 발급한 세션 토큰을 자기 쪽에 저장한다. 둘째, 개발자가 모델을 호출할 때마다 CLI는 게이트웨이로 보내는 요청에 이 토큰을 함께 실어 보내고, 게이트웨이는 <code>jwt_secret</code>으로 서명을 검증한 뒤 요청을 처리한다 — 즉 매 요청마다 이 토큰으로 신원을 다시 증명한다. 셋째, 토큰에는 <code>ttl_hours</code>로 정한 유효 기간이 담겨 있어, 만료된 토큰으로 요청하면 게이트웨이가 거부하고 개발자는 다시 SSO 로그인을 거쳐 새 토큰을 발급받는다.
+<br><br>
+<strong>이 세션 토큰은 <code>ANTHROPIC_AUTH_TOKEN</code>·<code>ANTHROPIC_API_KEY</code>와는 별개의 자격증명 경로다.</strong> Claude Code 공식 문서(<a href="https://code.claude.com/docs/en/authentication" target="_blank">Authentication</a>)에 따르면, <code>forceLoginMethod: "gateway"</code>로 SSO 로그인해 얻는 <strong>Claude apps gateway 세션</strong>은 "이 목록 밖에 있는" 별도의 자격증명이다 — 게이트웨이 세션이 있으면 CLI는 오직 그 세션 토큰으로만 인증하며, <code>ANTHROPIC_AUTH_TOKEN</code>(<code>Authorization: Bearer</code>)이나 <code>ANTHROPIC_API_KEY</code>(<code>x-api-key</code>) 같은 환경변수 기반 자격증명은 설정돼 있어도 전혀 쓰이지 않는다. (참고로 이 두 환경변수의 헤더 선택 규칙은 개발자가 <em>직접</em> 게이트웨이 URL을 지정하는 다른 연결 방식에 해당하는 규칙이며, <code>forceLoginMethod: "gateway"</code>의 SSO 흐름에는 적용되지 않는다.) 이 세션 토큰이 실제로 어느 HTTP 헤더에 담기는지는 Claude Code 공식 문서에 명시돼 있지 않다 — 게이트웨이 자체 구현(소스 코드)을 봐야 확정할 수 있다.
 </div>
 
 <h2>store — 상태 저장소</h2>
@@ -162,19 +164,18 @@ rate limit(요청 횟수 제한)은 대체로 다음 절차로 동작한다. 요
 
 <h2>선택 블록 — models · managed · telemetry · admin</h2>
 <p>
-앞의 다섯 블록은 사인인 흐름에 필요한 최소 구성이다. 여기에 네 개의 선택 블록을 더하면 게이트웨이가 중앙화하는 나머지 기능 — 모델 노출 큐레이션, 정책 강제, 사용량 수집, 지출 한도 관리 — 이 켜진다. 각 블록의 동작은 다른 레슨에서 다루므로, 여기서는 <code>gateway.yaml</code>에 무엇을 적는지만 짧게 본다.
+앞의 다섯 블록은 사인인 흐름에 필요한 최소 구성이다. 여기에 네 개의 선택 블록을 더하면 게이트웨이가 중앙화하는 나머지 기능 — 모델 노출 큐레이션, 정책 강제, 사용량 수집, 지출 한도 관리 — 이 활성화된다. 각 블록의 동작은 다른 레슨에서 다루므로, 여기서는 <code>gateway.yaml</code>에 무엇을 적는지만 짧게 본다.
 </p>
 
 <h3>models — 노출할 모델 큐레이션</h3>
 <p>
-관리자가 큐레이션한 모델 목록으로, <code>/v1/models</code>로 노출되며 업스트림마다 모델 ID를 번역(translate)하는 데 쓰인다. <code>auto_include_builtin_models: true</code>이면 기본 카탈로그를 자동 노출하고, <code>false</code>이면 아래 <code>models</code> 목록에 적은 것만 노출한다. 각 모델 항목은 게이트웨이가 노출하는 <code>id</code>·표시명 <code>label</code>, 그리고 업스트림별 실제 모델 ID를 매핑하는 <code>upstream_model</code>로 이루어진다. 공식 문서 기준으로 이 블록은 비(非)미국 Amazon Bedrock 리전, Amazon Bedrock provisioned-throughput ARN, Microsoft Foundry 배포 이름을 쓸 때 필요하다.
+관리자가 큐레이션한 모델 목록으로, <code>/v1/models</code>로 노출되며 업스트림마다 모델 ID를 번역(translate)하는 데 쓰인다. <code>auto_include_builtin_models: true</code>이면, 게이트웨이가 내장하고 있는 기본 카탈로그(예: <code>claude-opus-4-8</code>을 Bedrock의 <code>us.anthropic.claude-opus-4-8</code>로 매핑하는 등, Bedrock이 지원하는 모든 Claude 모델의 매핑을 미리 담아둔 표)를 자동 노출하고, <code>false</code>이면 아래 <code>models</code> 목록에 적은 것만 노출한다. 각 모델 항목은 게이트웨이가 노출하는 <code>id</code>·표시명 <code>label</code>, 그리고 업스트림별 실제 모델 ID를 매핑하는 <code>upstream_model</code>로 이루어진다. 공식 문서 기준으로 이 블록은 비(非)미국 Amazon Bedrock 리전, Amazon Bedrock provisioned-throughput ARN, Microsoft Foundry 배포 이름을 쓸 때 필요하다.
 </p>
 <pre><code>auto_include_builtin_models: true   # false면 아래 목록만 노출
 models:
   - id: claude-opus-4-8
     label: Claude Opus 4.8
     upstream_model:                 # 업스트림별 실제 모델 ID 매핑
-      anthropic: claude-opus-4-8
       bedrock: us.anthropic.claude-opus-4-8   # 또는 inference-profile ARN</code></pre>
 <p>
 <code>upstream_model</code>의 각 키는 설정된 업스트림 이름(기본값은 provider 이름)과 일치해야 하며, 어느 업스트림과도 일치하지 않는 키가 있으면 게이트웨이가 부팅에 실패한다. 그래서 쓰지 않는 provider의 줄은 생략한다.
@@ -209,6 +210,10 @@ IdP 그룹에 따라 다른 <strong>Managed Settings</strong>(모델 allowlist, 
         Authorization: Bearer ${CW_METRICS_API_KEY}
       metrics: true
       logs: false</code></pre>
+<div class="callout">
+<strong><code>Authorization</code> 헤더가 필요한 이유와 <code>CW_METRICS_API_KEY</code> 발급 방법.</strong>
+CloudWatch의 OTLP metrics 엔드포인트는 인증 없는 요청을 받지 않는다. AWS SigV4 서명 또는 Bearer 토큰(API 키) 두 방식을 지원하는데, <code>forward_to</code>는 헤더를 그대로 실어 보낼 뿐 SigV4 서명은 대신해 주지 않으므로 Bearer 토큰 방식을 쓴다. 이 API 키는 AWS 콘솔의 <strong>CloudWatch → Settings → Global → API Keys → Generate API key</strong>에서 발급한다. 콘솔이 전용 IAM 사용자를 만들고 <code>cloudwatch:CallWithBearerToken</code> 권한을 부여한 뒤 API Key Secret을 보여주는데, 이 값은 그때 한 번만 노출되므로 즉시 저장해야 한다(잃으면 재발급해야 한다). 이 Secret 값을 <code>CW_METRICS_API_KEY</code>에 넣는다.
+</div>
 
 <h3>admin — 지출 한도 관리 API</h3>
 <p>
@@ -219,6 +224,14 @@ IdP 그룹에 따라 다른 <strong>Managed Settings</strong>(모델 allowlist, 
     - { id: cli-reader, key: "${GATEWAY_ADMIN_READ_KEY}" }   # 조회 전용
   write_keys:
     - { id: cli-admin, key: "${GATEWAY_ADMIN_WRITE_KEY}" }   # 설정·삭제·조회</code></pre>
+<pre><code># 조직 전체 개발자에게 월 $500 한도를 기본값으로 설정
+curl -sS https://claude-gw.internal.example.com/v1/organizations/spend_limits \
+  -H "x-api-key: $GATEWAY_ADMIN_WRITE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"scope": {"type": "organization"}, "amount": "50000", "period": "monthly"}'</code></pre>
+<p>
+<code>scope.type</code>은 <code>user</code>(개발자 개인)·<code>rbac_group</code>(IdP 그룹)·<code>organization</code>(조직 전체 기본값) 중 하나이고, <code>amount</code>는 USD 센트 단위 정수 문자열(<code>null</code>이면 무제한), <code>period</code>는 <code>daily</code>·<code>weekly</code>·<code>monthly</code> 중 하나다. 인증은 <code>write_keys</code>에 등록한 키를 <code>x-api-key</code> 헤더로 전달한다.
+</p>
 
 <h2>확인 퀴즈</h2>
 <div class="quiz">

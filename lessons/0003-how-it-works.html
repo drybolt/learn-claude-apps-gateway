@@ -25,35 +25,38 @@ Lesson 2에서 <code>gateway.yaml</code>의 각 설정 블록이 맡는 역할�
   </defs>
   <style>
     .box { stroke: #1e1e1e; stroke-width: 1.5; rx: 8; }
-    .flow { fill: #a5d8ff; }
-    .expire { fill: #ffd43b; }
+    .step1 { fill: #4a8cdc; }
+    .step2 { fill: #ee7f52; }
+    .step3 { fill: #3dbb8e; }
+    .step4 { fill: #eda100; }
+    .step5 { fill: #eb8fb2; }
     .lbl { font-family: "Nanum Gothic", sans-serif; font-size: 15px; fill: #1a1a1a; }
     .edge { stroke: #1e1e1e; stroke-width: 1.5; fill: none; marker-end: url(#ah); }
   </style>
 
   <!-- 1단계: 로그인 (디바이스 인증 플로우) — 박스 3개 -->
-  <rect class="box flow" x="220" y="16" width="400" height="48" rx="8"></rect>
+  <rect class="box step1" x="220" y="16" width="400" height="48" rx="8"></rect>
   <text class="lbl" x="420" y="45" text-anchor="middle">1단계 · CLI에서 /login 실행</text>
-  <rect class="box flow" x="170" y="104" width="500" height="48" rx="8"></rect>
+  <rect class="box step1" x="170" y="104" width="500" height="48" rx="8"></rect>
   <text class="lbl" x="420" y="133" text-anchor="middle">1단계 · 게이트웨이가 사용자 코드·확인 URL 발급</text>
-  <rect class="box flow" x="210" y="192" width="420" height="48" rx="8"></rect>
+  <rect class="box step1" x="210" y="192" width="420" height="48" rx="8"></rect>
   <text class="lbl" x="420" y="221" text-anchor="middle">1단계 · 브라우저에서 회사 IdP 로그인</text>
   <!-- 2단계: 세션 확립 — 박스 2개 -->
-  <rect class="box flow" x="180" y="280" width="480" height="60" rx="8"></rect>
+  <rect class="box step2" x="180" y="280" width="480" height="60" rx="8"></rect>
   <text class="lbl" x="420" y="304" text-anchor="middle">2단계 · IdP 콜백 → 세션 토큰(JWT) 발급,</text>
   <text class="lbl" x="420" y="325" text-anchor="middle">Postgres에 상태 기록</text>
-  <rect class="box flow" x="180" y="380" width="480" height="48" rx="8"></rect>
+  <rect class="box step2" x="180" y="380" width="480" height="48" rx="8"></rect>
   <text class="lbl" x="420" y="409" text-anchor="middle">2단계 · CLI가 세션 토큰으로 이후 모든 요청 수행</text>
   <!-- 3단계: 요청별 정책 적용 -->
-  <rect class="box flow" x="180" y="476" width="480" height="60" rx="8"></rect>
+  <rect class="box step3" x="180" y="476" width="480" height="60" rx="8"></rect>
   <text class="lbl" x="420" y="500" text-anchor="middle">3단계 · 요청마다 정책 적용</text>
   <text class="lbl" x="420" y="521" text-anchor="middle">그룹 → managed.policies 매칭</text>
   <!-- 4단계: 추론 요청 전달 -->
-  <rect class="box flow" x="180" y="576" width="480" height="60" rx="8"></rect>
+  <rect class="box step4" x="180" y="576" width="480" height="60" rx="8"></rect>
   <text class="lbl" x="420" y="600" text-anchor="middle">4단계 · 정책 통과 시 추론 요청 전달</text>
   <text class="lbl" x="420" y="621" text-anchor="middle">upstream 형식으로 번역·라우팅</text>
   <!-- 5단계: 세션 만료와 재로그인 -->
-  <rect class="box expire" x="170" y="676" width="500" height="60" rx="8"></rect>
+  <rect class="box step5" x="170" y="676" width="500" height="60" rx="8"></rect>
   <text class="lbl" x="420" y="700" text-anchor="middle">5단계 · ttl_hours 경과 → 조용히 갱신(IdP 재확인)</text>
   <text class="lbl" x="420" y="721" text-anchor="middle">또는 재로그인 요구</text>
 
@@ -82,7 +85,7 @@ Lesson 2에서 <code>gateway.yaml</code>의 각 설정 블록이 맡는 역할�
 
 <h2>2단계. 세션 확립</h2>
 <p>
-IdP 로그인이 성공하면 게이트웨이는 사용자의 이메일과 그룹 정보를 받아 PostgreSQL에 로그인 상태를 기록하고, 단기 세션 토큰(JWT)을 발급한다. polling 중이던 CLI는 이 토큰을 받아 대기를 끝낸다. 이 시점 이후로 CLI는 원본 IdP 자격증명이 아니라 이 세션 토큰만으로 게이트웨이와 통신한다.
+IdP 로그인이 성공하면 게이트웨이는 IdP가 발급한 <code>id_token</code>을 검증해 그 안에 담긴 사용자의 이메일과 그룹 정보를 꺼내 PostgreSQL에 로그인 상태를 기록하고, 단기 세션 토큰(JWT)을 발급한다. <code>id_token</code>에서 이 값을 추출하는 상세 과정은 <a href="0004-device-auth-flow.html">디바이스 인증 플로우 자세히</a>에서 다룬다. polling 중이던 CLI는 이 토큰을 받아 대기를 끝낸다. 이 시점 이후로 CLI는 원본 IdP 자격증명이 아니라 이 세션 토큰만으로 게이트웨이와 통신한다.
 </p>
 
 <h2>3단계. 요청별 정책 적용</h2>
@@ -94,7 +97,7 @@ CLI가 무언가를 요청할 때마다 세션 토큰이 함께 전송된다. �
 <strong>정책을 담는 두 파일 — <code>managed-settings.json</code> vs <code>remote-settings.json</code>.</strong>
 관리자 정책을 개발자 기기에 전달하는 경로는 두 가지이고, 이름이 비슷하지만 성격이 다르다.
 <br><br>
-<strong><code>managed-settings.json</code> (정적 · 기기 단위)</strong> — 관리자가 MDM(기기 관리 도구)으로 각 기기의 고정 경로(예: Linux <code>/etc/claude-code/managed-settings.json</code>)에 미리 배포하는 파일이다. 게이트웨이 없이도 쓰지만, 정책이 <em>기기</em>에 묶여 그 기기를 누가 쓰든 같은 정책이 적용되고, 바꾸려면 MDM으로 다시 배포해야 한다.
+<strong><code>managed-settings.json</code> (정적 · 기기 단위)</strong> — 관리자가 MDM(기기 관리 도구)으로 각 기기의 고정 경로(macOS <code>/Library/Application Support/ClaudeCode/managed-settings.json</code>, Linux/WSL <code>/etc/claude-code/managed-settings.json</code>, Windows <code>C:\Program Files\ClaudeCode\managed-settings.json</code>)에 미리 배포하는 파일이다. 게이트웨이 없이도 쓰지만, 정책이 <em>기기</em>에 묶여 그 기기를 누가 쓰든 같은 정책이 적용되고, 바꾸려면 MDM으로 다시 배포해야 한다.
 <br><br>
 <strong><code>remote-settings.json</code> (동적 · 사용자 단위)</strong> — 로그인 시 게이트웨이가 사용자의 IdP 그룹에 맞는 정책을 클라이언트로 내려주면 CLI가 <code>~/.claude/remote-settings.json</code>에 캐시하는 파일이다. 정책이 <em>사용자(그룹)</em>에 묶여, 같은 기기라도 로그인한 사람에 따라 다른 정책이 적용되고, 로그인·갱신 때마다 최신 정책을 다시 받는다. 이 캐시는 사용자 로컬의 <code>~/.claude/settings.json</code>보다 우선 적용되므로 개발자가 관리자 정책을 덮어쓸 수 없다.
 <br><br>
@@ -106,10 +109,28 @@ CLI가 무언가를 요청할 때마다 세션 토큰이 함께 전송된다. �
 개발자가 실제로 Claude에게 질문하면 CLI는 항상 동일한 Anthropic Messages API 형식으로 게이트웨이에 요청을 보낸다. 게이트웨이는 이 요청이 정책상 허용된 모델인지 먼저 검사하고, 허용되지 않으면 400 응답을 돌려준다. 통과하면 <code>upstreams</code>에 등록된 대상에 맞는 형식으로 번역해 전달하고, 응답이 오면 다시 CLI가 이해하는 형식으로 돌려준다. 이 과정에서 CLI는 요청이 어느 업스트림으로 갔는지 알 필요가 없으며, 번역과 라우팅은 전부 게이트웨이가 대신한다.
 </p>
 
+<div class="callout">
+<strong>"번역"이 실제로 바꾸는 것 — 단, "Messages API=API 키" · "Bedrock=InvokeModel·SigV4"라는 대응은 고정된 사실이 아니다.</strong>
+CLI가 보내는 <strong>Anthropic Messages API</strong> 형식과 Bedrock의 <strong><code>InvokeModel</code></strong> API를 비교하면, 요청 바디의 필드(<code>messages</code>, <code>system</code>, <code>max_tokens</code> 등)는 대부분 그대로다. 차이는 두 가지뿐이다 — ① 최상위 <code>model</code> 필드가 바디 안에 없고 <code>InvokeModel</code> 호출 자체의 <code>modelId</code> 파라미터로 대신 지정되며, ② Bedrock 전용 필드 <code>anthropic_version: "bedrock-2023-05-31"</code>이 추가로 필요하다.
+<br><br>
+<strong>Messages API는 API 키만 쓰지 않는다.</strong> <code>x-api-key</code>(<code>ANTHROPIC_API_KEY</code>) 외에도 <strong>OAuth Bearer 토큰</strong>(<code>Authorization: Bearer</code>) — 구독 로그인(<code>/login</code>), <code>ANTHROPIC_AUTH_TOKEN</code>, Workload Identity Federation 등 — 을 지원한다. API 키는 여러 인증 방식 중 하나다.
+<br><br>
+<strong>Bedrock도 <code>InvokeModel</code>만 쓰지 않는다.</strong> AWS는 <strong>두 엔드포인트</strong>를 제공한다 — 고전 <code>bedrock-runtime</code>(<code>InvokeModel</code>·<code>Converse</code>, AWS SigV4 또는 최근엔 Bedrock API 키도 지원)과 신규 <code>bedrock-mantle</code>(<strong>Messages API 형식을 그대로 받는다</strong> — <code>anthropic_version</code> 바디 필드 없이 HTTP 헤더로만 처리, Bedrock API 키 또는 SigV4). 즉 <code>bedrock-mantle</code>에서는 "Bedrock=다른 형식"이라는 전제 자체가 성립하지 않는다.
+<br><br>
+<strong>이 실습이 실제로 쓰는 조합.</strong> <code>gateway.yaml</code>의 <code>upstreams.auth: {}</code>(비워 두면 <strong>게이트웨이가 실행되는 환경이 제공하는 AWS 자격증명 체인</strong>을 쓴다는 뜻 — 이 실습에서는 그 환경이 ECS이므로 <strong>ECS Task Role</strong>이 된다)는 <strong>고전 <code>bedrock-runtime</code> + AWS SigV4</strong> 조합을 가리킨다 — 이건 "Bedrock은 다 이렇다"는 보편적 사실이 아니라 이 프로젝트가 그 경로를 택한 것이다. CLI ↔ 게이트웨이 구간은 2단계에서 발급한 <strong>세션 토큰(JWT)</strong>으로, 게이트웨이 ↔ Bedrock 구간은 <strong>실행 환경의 AWS 자격증명(이 실습에서는 ECS Task Role) + SigV4</strong>로 인증한다 — 이 둘은 완전히 별개의 값이며, 게이트웨이가 CLI의 요청을 받아 이 형식·인증으로 바꿔 직접 호출하고 응답을 다시 Messages API 형식으로 바꿔 돌려준다. 이 변환을 <strong>게이트웨이 자신이 수행</strong>하므로 CLI는 업스트림이 무엇인지 알 필요가 없다.
+</div>
+
 <h2>5단계. 세션 만료와 재로그인</h2>
 <p>
 세션 토큰은 <code>ttl_hours</code>가 지나면 만료된다. 만료되기 전에 CLI가 조용히 토큰 갱신을 시도하는데, 이때 게이트웨이는 IdP에 사용자가 여전히 유효한지 재확인한다. IdP에서 계정이 비활성화되었다면 이 갱신이 실패하고, 개발자는 다시 브라우저 로그인을 해야 한다. 결과적으로 권한 회수는 IdP에서 계정을 끄는 것만으로 이루어지고, 게이트웨이가 그것을 다음 갱신 시점에 자동으로 반영한다.
 </p>
+
+<div class="callout">
+<strong>"조용히"의 기술적 의미 — 리프레시 토큰 그랜트(refresh token grant)로, 사용자 상호작용이 없는 서버 대 서버 호출이다.</strong>
+일반 로그인은 브라우저 리다이렉트(<code>302</code>)를 거쳐 사용자가 IdP 로그인 화면에서 자격증명을 입력하는 <strong>authorization code flow</strong>다. 이건 사용자 액션이 필수다. 반면 세션 만료 직전의 갱신은 이 흐름을 전혀 타지 않는다. 1단계에서 게이트웨이는 <code>id_token</code>과 함께 <strong>리프레시 토큰</strong>도 받아 저장해 두는데(<a href="0004-device-auth-flow.html">Lesson 4</a>), 만료가 다가오면 게이트웨이는 브라우저에 아무것도 띄우지 않고 이 리프레시 토큰을 들고 <strong>IdP의 토큰 엔드포인트에 직접 HTTP 요청</strong>을 보낸다(OAuth 2.0의 <code>grant_type=refresh_token</code> 요청). IdP는 계정이 여전히 활성 상태인지 확인한 뒤, 유효하면 새 <code>id_token</code>(+ 새 리프레시 토큰)을 돌려주고, 게이트웨이는 이 응답으로 새 세션 토큰(JWT)을 발급한다. 이 전체 과정이 서버 대 서버 HTTP 요청 하나로 끝나므로 브라우저 리다이렉트나 사용자 입력이 전혀 개입하지 않는다 — 이것이 "조용히"가 가리키는 정확한 동작이다.
+<br><br>
+IdP가 계정을 비활성화했다면, 리프레시 토큰도 그 계정에 연결돼 있으므로 이 토큰 엔드포인트 요청 자체가 거부된다. 이때만 게이트웨이가 서버 대 서버 갱신을 포기하고, 처음으로 브라우저를 통한 <strong>authorization code flow</strong>(사용자 개입 필요)로 되돌아간다. 즉 "조용히"는 정확히 "리프레시 토큰 그랜트 경로"를, 그 반대는 "authorization code 그랜트 경로(사용자 로그인 화면)"를 가리킨다.
+</div>
 
 <h2>확인 퀴즈</h2>
 <div class="quiz">

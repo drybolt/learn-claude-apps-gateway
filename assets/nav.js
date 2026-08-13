@@ -26,7 +26,9 @@
         { href: "setup-client-vpn.html",           label: "Client VPN 설정" },
         { href: "setup-route53-private-zone.html", label: "Route53 Private Zone 설정" },
         { href: "setup-service-discovery.html",    label: "Service Discovery" },
-        { href: "setup-cognito.html",              label: "Cognito 설정" }
+        { href: "setup-ecs-cluster.html",          label: "ECS 설정" },
+        { href: "setup-cognito.html",              label: "Cognito 설정" },
+        { href: "troubleshooting-log.html",        label: "트러블슈팅 로그" }
       ]
     }
   ];

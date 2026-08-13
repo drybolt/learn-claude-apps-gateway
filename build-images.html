@@ -22,52 +22,92 @@
 <tr><td>postgres</td><td>공개 <code>postgres:16</code></td><td>아니오</td><td>선택(미러링 권장)</td></tr>
 </table>
 
+<h2>사전 준비 환경 (macOS 기준)</h2>
+<p>
+아래 준비물은 모두 <strong>gateway 이미지 빌드</strong>에 필요한 것이다(postgres는 공개 이미지라 별도 준비물이 없다).
+</p>
+<ul>
+<li><strong>네이티브 <code>claude</code> 바이너리</strong> (1단계) — v2.1.195 이상. Claude Code 설치 스크립트의 <strong>native(standalone) 설치</strong>로 최신 버전을 받는다.
+<pre><code>curl -fsSL https://claude.ai/install.sh | bash</code></pre>
+게이트웨이 서버 모드는 <strong>native 바이너리에서만 동작</strong>한다(npm/Node.js 설치본으로는 뜨지 않는다 — 공식 문서). 또한 이미지가 Linux 베이스이므로 macOS용이 아니라 <strong>배포 대상 아키텍처의 Linux용 바이너리</strong>여야 한다(아래 callout 참고).</li>
+<li><strong>OpenSSL</strong> (2단계) — macOS 기본 <code>openssl</code>은 LibreSSL이며, 문서의 <code>-addext "subjectAltName=…"</code> 옵션이 구버전 LibreSSL에서 동작하지 않을 수 있다. <code>openssl version</code>으로 확인하고, LibreSSL이면 <code>brew install openssl</code>로 정식 OpenSSL(3.x)을 설치해 쓴다.</li>
+<li><strong>Docker</strong> (3·4단계) — Docker Desktop 또는 colima 등 대체 런타임. 이미지 빌드·push에 쓴다.</li>
+<li><strong>AWS CLI</strong> (4단계) — ECR 리포지토리 생성·로그인·push에 쓴다. <code>brew install awscli</code> 후 <code>aws sts get-caller-identity</code>로 us-east-1 접근 인증을 확인한다.</li>
+</ul>
+
+<div class="callout">
+<strong>아키텍처를 일치시켜야 한다 — Apple Silicon에서 특히 주의한다.</strong>
+Fargate Task는 <code>cpuArchitecture</code>를 지정하지 않으면 <strong>기본이 <code>X86_64</code></strong>다(공식 문서). 반면 Apple Silicon(M1~) 랩탑에서 <code>docker build</code>는 기본으로 <strong>arm64</strong> 이미지를 만든다. 이 둘이 어긋나면 Task 실행 시 <code>exec format error</code>로 컨테이너가 뜨지 않는다. <strong>claude 바이너리 · 빌드한 이미지 · Fargate Task 세 가지의 아키텍처를 모두 일치</strong>시켜야 한다.
+<ul>
+<li>x86_64로 맞추는 경우(기본): Linux <strong>x86_64</strong> claude 바이너리를 받고, <code>docker build --platform linux/amd64 …</code>로 빌드한다. Task는 기본값 그대로 둔다.</li>
+<li>arm64로 맞추는 경우: Linux <strong>arm64</strong> 바이너리 + <code>--platform linux/arm64</code>로 빌드하고, Task Definition의 <code>cpuArchitecture</code>를 <code>ARM64</code>로 지정한다.</li>
+</ul>
+</div>
+
 <h2>gateway 이미지 — 직접 빌드</h2>
 <p>
 Anthropic은 게이트웨이용 컨테이너 이미지를 공개 배포하지 않는다. 게이트웨이 기능은 <code>claude</code> 바이너리에 내장돼 있으므로, 그 <strong>네이티브 바이너리를 담은 이미지를 직접 만들어야</strong> 한다.
 </p>
+<p>
+아래 1~3단계는 <strong>하나의 빌드 컨텍스트 디렉터리</strong>를 채우는 과정이다. Dockerfile의 <code>COPY</code>는 이 디렉터리를 기준으로 한 상대 경로만 참조하므로(4단계의 <code>docker build … .</code>에서 <code>.</code>이 이 디렉터리를 가리킨다), <strong>모든 명령을 이 디렉터리 안에서 실행</strong>하고 파일도 전부 여기에 둔다.
+</p>
+<pre><code>gateway-build/                # 빌드 컨텍스트 (임의 이름, 여기서 모든 명령 실행)
+├── claude                    # 1단계: 네이티브 claude 바이너리
+├── tls/                      # 2단계: 자체 서명 인증서 (mkdir + openssl)
+│   ├── cert.pem
+│   └── key.pem
+├── gateway.yaml              # 단계 4에서 작성한 설정
+└── Dockerfile                # 3단계</code></pre>
 
 <h3>1. 네이티브 claude 바이너리 확보</h3>
 <p>
 <strong>v2.1.195 이상</strong>의 네이티브 바이너리가 필요하다. 게이트웨이 서버 모드(<code>claude gateway</code>)는 네이티브 바이너리에서만 동작하며, npm/Node.js 설치본으로는 서버가 뜨지 않는다. 빌드 컨텍스트(Dockerfile과 같은 디렉터리)에 이 바이너리를 <code>claude</code>라는 이름으로 둔다.
 </p>
 
-<h3>2. Dockerfile 작성</h3>
+<h3>2. 자체 서명 TLS 인증서 생성</h3>
 <p>
-AWS 블로그 예시를 따른다. 경량 베이스에 바이너리를 복사하고, <strong>gateway.yaml과 TLS 인증서를 이미지에 함께 굽는다</strong>(테스트 방식 — 아래 callout 참고). <code>ENTRYPOINT</code>는 게이트웨이 서버로 지정한다.
-</p>
-<pre><code>FROM debian:12-slim                          # glibc 기반 경량 베이스
-RUN useradd -m -u 10001 gateway || true
-COPY claude /usr/local/bin/claude            # 네이티브 claude 바이너리 복사
-RUN chmod +x /usr/local/bin/claude
-
-# --- 테스트 방식: 설정·인증서를 이미지에 굽는다 ---
-COPY gateway.yaml /etc/claude/gateway.yaml   # 단계 4에서 작성한 설정
-COPY tls/cert.pem /etc/claude/tls/cert.pem   # 자체 서명 인증서
-COPY tls/key.pem  /etc/claude/tls/key.pem
-
-ENV CLAUDE_CONFIG_DIR=/tmp/.claude
-ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1   # Anthropic으로의 비필수 트래픽 차단
-EXPOSE 8080
-ENTRYPOINT ["claude", "gateway", "--config", "/etc/claude/gateway.yaml"]</code></pre>
-
-<div class="callout">
-<strong>이 테스트는 설정·인증서를 이미지에 굽는다 — 편의를 위한 선택이다.</strong>
-<code>gateway.yaml</code>과 TLS 인증서를 <code>COPY</code>로 이미지에 포함하면 별도 볼륨·시크릿 마운트가 필요 없어 가장 단순하다. 단, <strong>비밀값(<code>OIDC_CLIENT_SECRET</code> 등)은 이미지에 굽지 않는다</strong> — <code>gateway.yaml</code>이 <code>${ENV_VAR}</code>로 참조하고, 실제 값은 ECS Task Definition의 환경변수(또는 Secrets Manager)로 <strong>런타임에 주입</strong>한다. 자체 서명 인증서와 설정이 이미지에 남는 것은 테스트라 용인하지만, 운영에서는 인증서를 Secrets Manager에서 마운트하고 설정도 이미지 밖에서 주입하는 방식으로 전환한다.
-</div>
-
-<h3>3. 자체 서명 TLS 인증서 생성</h3>
-<p>
-게이트웨이 hostname(단계 0에서 정한 이름)에 대한 자체 서명 인증서를 만들어 빌드 컨텍스트의 <code>tls/</code>에 둔다.
+게이트웨이 hostname(단계 0에서 정한 이름)에 대한 자체 서명 인증서를 만들어 빌드 컨텍스트의 <code>tls/</code>에 둔다. 다음 Dockerfile이 이 <code>tls/cert.pem</code>·<code>tls/key.pem</code>을 <code>COPY</code>하므로, 빌드 전에 먼저 만들어 둔다.
 </p>
 <pre><code>mkdir -p tls
 openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
   -keyout tls/key.pem -out tls/cert.pem \
   -subj "/CN=&lt;gateway-hostname&gt;" \
   -addext "subjectAltName=DNS:&lt;gateway-hostname&gt;"</code></pre>
+<div class="callout">
+<strong><code>&lt;gateway-hostname&gt;</code>은 반드시 실제 값으로 치환한다.</strong>
+이 문자열을 그대로 실행하면 인증서의 SAN(subjectAltName)에 <code>&lt;gateway-hostname&gt;</code>이라는 리터럴 문자열이 그대로 박힌다. 클라이언트가 실제 hostname(예: <code>claude-gw.internal.example.com</code>)으로 접속하면 <code>Hostname/IP does not match certificate's altnames</code> 에러로 실패한다. <code>-subj</code>와 <code>-addext</code> 두 곳 모두 실제 hostname으로 바꿔야 한다.
+</div>
 <p>
-자체 서명이라 클라이언트가 신뢰하지 않을 수 있다. 랩탑에서 이 인증서를 신뢰 저장소에 추가하거나, 테스트 목적이면 신뢰 경고를 수동으로 통과한다. (공인 인증서가 필요하면 실습 가이드의 "정석 구성으로 전환" — ALB + ACM으로 넘어간다.)
+자체 서명이라 클라이언트가 신뢰하지 않을 수 있다. 랩탑에서는 인증서 전체를 신뢰 저장소에 추가하는 대신, Claude Code의 <code>~/.claude/settings.json</code>에 <code>env.NODE_EXTRA_CA_CERTS</code>로 <code>tls/cert.pem</code>(공개 인증서, <code>key.pem</code>은 필요 없음) 경로를 지정하는 방법이 더 간단하다 — 자세한 내용은 <a href="self-guide-aws.html">실습 가이드</a> 단계 6에 있다. (공인 인증서가 필요하면 실습 가이드의 "정석 구성으로 전환" — ALB + ACM으로 넘어간다.)
 </p>
+
+<h3>3. Dockerfile 작성</h3>
+<p>
+AWS 블로그 예시를 따른다. 경량 베이스에 바이너리를 복사하고, <strong>gateway.yaml과 TLS 인증서를 이미지에 함께 굽는다</strong>(테스트 방식 — 아래 callout 참고). <code>ENTRYPOINT</code>는 게이트웨이 서버로 지정한다.
+</p>
+<pre><code>FROM debian:12-slim                          # glibc 기반 경량 베이스
+RUN useradd -m -u 10001 gateway || true
+COPY claude /usr/local/bin/claude            # 네이티브 claude 바이너리 복사 (1단계)
+RUN chmod +x /usr/local/bin/claude
+
+# --- 테스트 방식: 설정·인증서를 이미지에 굽는다 ---
+COPY gateway.yaml /etc/claude/gateway.yaml   # 단계 4에서 작성한 설정
+COPY tls/cert.pem /etc/claude/tls/cert.pem   # 자체 서명 인증서 (2단계)
+COPY tls/key.pem  /etc/claude/tls/key.pem
+
+ENV CLAUDE_CONFIG_DIR=/tmp/.claude
+ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1   # Anthropic으로의 비필수 트래픽 차단
+EXPOSE 443
+ENTRYPOINT ["claude", "gateway", "--config", "/etc/claude/gateway.yaml"]</code></pre>
+<div class="callout">
+<strong><code>EXPOSE</code>는 <code>gateway.yaml</code>의 <code>listen.port</code>와 일치해야 한다.</strong>
+이 구성은 ALB 없이 게이트웨이가 직접 443을 종단하므로(<a href="self-guide-aws.html">실습 가이드</a> 단계 4), <code>listen.port: 443</code>과 맞춰 <code>EXPOSE 443</code>을 쓴다. 8080으로 두면 클라이언트가 기본 포트(443)로 접속을 시도할 때 <code>ECONNREFUSED</code>로 거부된다. Dockerfile에 <code>USER</code> 지정이 없어 컨테이너가 root로 실행되므로 443 같은 privileged port를 바인딩하는 데 권한 문제는 없다.
+</div>
+
+<div class="callout">
+<strong>이 테스트는 설정·인증서를 이미지에 굽는다 — 편의를 위한 선택이다.</strong>
+<code>gateway.yaml</code>과 TLS 인증서를 <code>COPY</code>로 이미지에 포함하면 별도 볼륨·시크릿 마운트가 필요 없어 가장 단순하다. 단, <strong>비밀값(<code>OIDC_CLIENT_SECRET</code> 등)은 이미지에 굽지 않는다</strong> — <code>gateway.yaml</code>이 <code>${ENV_VAR}</code>로 참조하고, 실제 값은 ECS Task Definition의 환경변수(또는 Secrets Manager)로 <strong>런타임에 주입</strong>한다. 자체 서명 인증서와 설정이 이미지에 남는 것은 테스트라 용인하지만, 운영에서는 인증서를 Secrets Manager에서 마운트하고 설정도 이미지 밖에서 주입하는 방식으로 전환한다.
+</div>
 
 <h3>4. ECR에 push</h3>
 <p>
@@ -84,6 +124,10 @@ docker push &lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com/claude-gateway:te
 <p>
 이 이미지 URI를 단계 5의 gateway Task Definition에 지정한다.
 </p>
+<div class="callout">
+<strong>Task Definition에는 태그로 지정한다 — 다이제스트로 고정하지 않는다.</strong>
+<code>...claude-gateway:test</code>처럼 태그로 지정해야, 이후 같은 태그로 재빌드·push한 뒤 <code>aws ecs update-service --force-new-deployment</code>로 최신 이미지를 실제로 반영할 수 있다. 이미지 필드가 <code>...claude-gateway@sha256:...</code> 같은 다이제스트로 고정돼 있으면, 태그가 새 다이제스트로 옮겨가도 ECS는 그 옛 다이제스트만 계속 pull한다.
+</div>
 
 <h2>postgres 이미지 — 공개 이미지 그대로</h2>
 <p>
@@ -107,6 +151,9 @@ Fargate가 Docker Hub에서 직접 pull하면 익명 pull rate limit에 걸릴 �
 <div class="ask-agent">
 gateway.yaml·인증서를 이미지에 굽지 않고 Secrets Manager로 주입하는 운영 방식이 필요하면 요청하세요.
 </div>
+<p>
+이 단계에서 실제로 겪은 문제(포트 불일치, 인증서 SAN 불일치, 다이제스트 고정)의 증상과 조치 과정은 <a href="troubleshooting-log.html">트러블슈팅 로그</a>에 기록돼 있다.
+</p>
 
 <div class="nav-links">
 <span><a href="self-guide-aws.html">&larr; 실습 가이드</a></span>

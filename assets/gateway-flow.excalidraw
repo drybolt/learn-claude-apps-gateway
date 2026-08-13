@@ -12,19 +12,26 @@
       "height": 60,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#a5d8ff",
+      "backgroundColor": "#4a8cdc",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "seed": 100001,
       "version": 1,
       "versionNonce": 200001,
       "isDeleted": false,
-      "boundElements": [{ "type": "text", "id": "txt1" }],
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "txt1"
+        }
+      ],
       "updated": 1717000000000,
       "link": null,
       "locked": false
@@ -72,19 +79,26 @@
       "height": 60,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#a5d8ff",
+      "backgroundColor": "#4a8cdc",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "seed": 100003,
       "version": 1,
       "versionNonce": 200003,
       "isDeleted": false,
-      "boundElements": [{ "type": "text", "id": "txt2" }],
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "txt2"
+        }
+      ],
       "updated": 1717000000000,
       "link": null,
       "locked": false
@@ -132,19 +146,26 @@
       "height": 60,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#a5d8ff",
+      "backgroundColor": "#4a8cdc",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "seed": 100005,
       "version": 1,
       "versionNonce": 200005,
       "isDeleted": false,
-      "boundElements": [{ "type": "text", "id": "txt3" }],
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "txt3"
+        }
+      ],
       "updated": 1717000000000,
       "link": null,
       "locked": false
@@ -192,19 +213,26 @@
       "height": 72,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#a5d8ff",
+      "backgroundColor": "#ee7f52",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "seed": 100007,
       "version": 1,
       "versionNonce": 200007,
       "isDeleted": false,
-      "boundElements": [{ "type": "text", "id": "txt4" }],
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "txt4"
+        }
+      ],
       "updated": 1717000000000,
       "link": null,
       "locked": false
@@ -252,19 +280,26 @@
       "height": 60,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#a5d8ff",
+      "backgroundColor": "#ee7f52",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "seed": 100009,
       "version": 1,
       "versionNonce": 200009,
       "isDeleted": false,
-      "boundElements": [{ "type": "text", "id": "txt5" }],
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "txt5"
+        }
+      ],
       "updated": 1717000000000,
       "link": null,
       "locked": false
@@ -312,19 +347,26 @@
       "height": 72,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#b2f2bb",
+      "backgroundColor": "#3dbb8e",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "seed": 100011,
       "version": 1,
       "versionNonce": 200011,
       "isDeleted": false,
-      "boundElements": [{ "type": "text", "id": "txt5a" }],
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "txt5a"
+        }
+      ],
       "updated": 1717000000000,
       "link": null,
       "locked": false
@@ -372,19 +414,26 @@
       "height": 72,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#b2f2bb",
+      "backgroundColor": "#eda100",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "seed": 100013,
       "version": 1,
       "versionNonce": 200013,
       "isDeleted": false,
-      "boundElements": [{ "type": "text", "id": "txt5b" }],
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "txt5b"
+        }
+      ],
       "updated": 1717000000000,
       "link": null,
       "locked": false
@@ -432,19 +481,26 @@
       "height": 72,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#ffd43b",
+      "backgroundColor": "#eb8fb2",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "seed": 100015,
       "version": 1,
       "versionNonce": 200015,
       "isDeleted": false,
-      "boundElements": [{ "type": "text", "id": "txt6" }],
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "txt6"
+        }
+      ],
       "updated": 1717000000000,
       "link": null,
       "locked": false
@@ -499,7 +555,9 @@
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "seed": 100017,
       "version": 1,
       "versionNonce": 200017,
@@ -508,7 +566,16 @@
       "updated": 1717000000000,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 56]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          56
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -531,7 +598,9 @@
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "seed": 100018,
       "version": 1,
       "versionNonce": 200018,
@@ -540,7 +609,16 @@
       "updated": 1717000000000,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 56]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          56
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -563,7 +641,9 @@
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "seed": 100019,
       "version": 1,
       "versionNonce": 200019,
@@ -572,7 +652,16 @@
       "updated": 1717000000000,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 56]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          56
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -595,7 +684,9 @@
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "seed": 100020,
       "version": 1,
       "versionNonce": 200020,
@@ -604,7 +695,16 @@
       "updated": 1717000000000,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [0, 54]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          54
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -627,7 +727,9 @@
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "seed": 100021,
       "version": 1,
       "versionNonce": 200021,
@@ -636,7 +738,16 @@
       "updated": 1717000000000,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-180, 66]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -180,
+          66
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -659,7 +770,9 @@
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "seed": 100022,
       "version": 1,
       "versionNonce": 200022,
@@ -668,7 +781,16 @@
       "updated": 1717000000000,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [180, 66]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          180,
+          66
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -691,7 +813,9 @@
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "seed": 100023,
       "version": 1,
       "versionNonce": 200023,
@@ -700,7 +824,16 @@
       "updated": 1717000000000,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [160, 56]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          160,
+          56
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,
@@ -723,7 +856,9 @@
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "seed": 100024,
       "version": 1,
       "versionNonce": 200024,
@@ -732,7 +867,16 @@
       "updated": 1717000000000,
       "link": null,
       "locked": false,
-      "points": [[0, 0], [-160, 56]],
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -160,
+          56
+        ]
+      ],
       "lastCommittedPoint": null,
       "startBinding": null,
       "endBinding": null,

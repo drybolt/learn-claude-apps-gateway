@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>ECS 설정 — 클러스터 · postgres Task · gateway Task (Fargate)</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="page">
+
+<p class="kicker">Self-guide 부록 · Amazon ECS</p>
+<h1>ECS 설정 — 클러스터 · postgres Task · gateway Task (Fargate)</h1>
+<p class="subtitle">최신 ECS 콘솔(console v2)로 Fargate 클러스터를 만들고, postgres와 gateway를 별도 Service로 띄운다.</p>
+
+<p>
+<a href="self-guide-aws.html">실습 가이드</a> 단계 5에서 참조하는 문서다. 단계 5는 "gateway와 postgres를 별도 Task로 분리한다"는 설계 의도만 담고 있으므로, 여기서 클러스터 생성부터 두 Service 배포까지의 콘솔 절차를 순서대로 다룬다. <strong>postgres를 먼저</strong> 띄워 Cloud Map 이름을 등록한 뒤 <strong>gateway를 나중에</strong> 띄우는 순서를 지킨다 — gateway는 시작 시점에 <code>postgres.claude-gw.local</code>로 DB를 찾기 때문이다.
+</p>
+
+<div class="callout">
+<strong>선행 조건.</strong>
+이 문서를 시작하기 전에 다음이 준비돼 있어야 한다. <a href="build-images.html">이미지 준비</a>에서 <strong>gateway 이미지를 ECR에 push</strong>했고(postgres는 공개 <code>postgres:16</code> 이미지를 그대로 쓴다), 단계 2에서 <strong>VPC·Private Subnet(<code>10.0.1.0/24</code>)·NAT Gateway</strong>를 만들었으며, 단계 0에서 <strong>hostname과 CIDR</strong>을 확정했다. gateway에 넘길 비밀값(<code>OIDC_CLIENT_SECRET</code>·<code>GATEWAY_JWT_SECRET</code>·<code>GATEWAY_POSTGRES_URL</code>)도 확보해 두어야 한다.
+</div>
+
+<h2>1 · 클러스터 생성</h2>
+<p>
+클러스터는 Task·Service가 실행되는 논리적 단위다. Fargate는 서버리스라 EC2 인스턴스를 직접 관리하지 않는다.
+</p>
+<ol>
+<li>ECS 콘솔(<code>console.aws.amazon.com/ecs/v2</code>, us-east-1)에서 좌측 <strong>Clusters</strong> → <strong>Create cluster</strong>.</li>
+<li><strong>Cluster name</strong> = <code>claude-gw-cluster</code>.</li>
+<li><strong>Infrastructure</strong> = <strong>AWS Fargate (serverless)</strong>를 선택한다. (콘솔이 Fargate·Fargate Spot capacity provider를 자동으로 연결한다.)</li>
+<li>나머지는 기본값으로 두고 <strong>Create</strong>. 콘솔이 CloudFormation 스택으로 필요한 리소스를 만든다.</li>
+</ol>
+<div class="callout">
+<strong>클러스터 네임스페이스는 지금 지정하지 않는다.</strong>
+클러스터 생성 화면에도 네임스페이스(Service Connect용) 옵션이 있지만, 이 실습은 Service Discovery(Cloud Map DNS) 방식을 쓰므로 여기서 만들지 않는다. Cloud Map 네임스페이스(<code>claude-gw.local</code>)는 3단계에서 <strong>postgres Service를 만들 때 함께 생성</strong>된다. 두 방식의 차이는 <a href="setup-service-discovery.html">Service Discovery 설정</a> 문서에서 다룬다.
+</div>
+
+<h2>2 · postgres Task Definition 작성</h2>
+<p>
+Task Definition은 "이 컨테이너를 어떤 이미지·CPU·메모리·환경변수로 실행하라"는 설계도다. 먼저 postgres용을 만든다.
+</p>
+<ol>
+<li>좌측 <strong>Task definitions</strong> → <strong>Create new task definition</strong>.</li>
+<li><strong>Task definition family</strong> = <code>claude-gw-postgres</code>.</li>
+<li><strong>Infrastructure requirements</strong>
+<ul>
+<li><strong>Launch type</strong> = <strong>AWS Fargate</strong>.</li>
+<li><strong>Task size</strong> = 예: CPU <code>0.5 vCPU</code>, Memory <code>1 GB</code>. (테스트 규모. Fargate는 CPU·메모리 조합이 정해져 있으므로 허용되는 값에서 고른다.)</li>
+<li><strong>Task role</strong>은 비워도 된다(postgres는 다른 AWS API를 호출하지 않는다). <strong>Task execution role</strong>은 CloudWatch 로그 전송을 위해 <code>ecsTaskExecutionRole</code>을 선택한다(없으면 콘솔이 생성 제안). postgres는 Docker Hub 공개 이미지를 쓰므로 이미지 pull 자체에는 이 role이 필요 없다 — ECR private repo pull에만 이 role의 권한이 쓰인다.</li>
+</ul>
+</li>
+<li><strong>Container - 1</strong>
+<ul>
+<li><strong>Name</strong> = <code>postgres</code>.</li>
+<li><strong>Image URI</strong> = <code>postgres:16</code> (Docker Hub 공개 이미지).</li>
+<li><strong>Port mappings</strong> = 컨테이너 포트 <code>5432</code>, 프로토콜 TCP.</li>
+<li><strong>Environment variables</strong>에 초기화 값을 추가한다. 예:
+<table>
+<tr><th>Key</th><th>Value</th></tr>
+<tr><td><code>POSTGRES_USER</code></td><td><code>gateway</code></td></tr>
+<tr><td><code>POSTGRES_PASSWORD</code></td><td>임의의 비밀번호(예: <code>changeme123</code> — 테스트값이므로 실제 배포 전 반드시 교체)</td></tr>
+<tr><td><code>POSTGRES_DB</code></td><td><code>gateway</code></td></tr>
+</table>
+이 값들이 단계 4 <code>GATEWAY_POSTGRES_URL</code>의 사용자·비밀번호·DB 이름과 일치해야 한다.</li>
+</ul>
+</li>
+<li><strong>Create</strong>.</li>
+</ol>
+
+<h2>3 · postgres Service 생성 (Cloud Map 이름 등록)</h2>
+<p>
+Service는 Task를 지정한 개수만큼 띄우고 유지한다. 이 단계에서 <strong>Service Discovery</strong>를 켜면 ECS가 Cloud Map private DNS namespace를 자동으로 만들고 이 Task를 <code>postgres.claude-gw.local</code>로 등록한다.
+</p>
+<ol>
+<li><strong>Clusters</strong> → <code>claude-gw-cluster</code> → <strong>Services</strong> 탭 → <strong>Create</strong>.</li>
+<li><strong>Compute options</strong> = <strong>Launch type</strong> = <strong>Fargate</strong>.</li>
+<li><strong>Service details</strong>
+<ul>
+<li><strong>Task definition</strong> = <code>claude-gw-postgres</code>, <strong>Revision</strong> = 최신.</li>
+<li><strong>Service name</strong> = <code>postgres</code>.</li>
+<li><strong>Desired tasks</strong> = <code>1</code>.</li>
+</ul>
+</li>
+<li><strong>Networking</strong>
+<ul>
+<li><strong>VPC</strong> = 단계 2에서 만든 VPC.</li>
+<li><strong>Subnets</strong> = <strong>Private Subnet(<code>10.0.1.0/24</code>)</strong>만 선택한다.</li>
+<li><strong>Security group</strong> = 새로 만든다. 이름 = <code>claude-gw-postgres-sg</code>. Inbound rules는 다음과 같이 추가한다(gateway SG를 아직 안 만들었으면, gateway Service 생성 후 이 규칙을 추가한다).
+<table>
+<tr><th>Type</th><th>Protocol</th><th>Port range</th><th>Source</th></tr>
+<tr><td>Custom TCP</td><td>TCP</td><td><code>5432</code></td><td>Custom → <code>claude-gw-gateway-sg</code>(보안 그룹 ID로 검색해 선택)</td></tr>
+</table>
+Source를 CIDR이 아니라 보안 그룹으로 지정하면, gateway Task가 재배포로 IP가 바뀌어도 규칙을 다시 손댈 필요가 없다.</li>
+<li><strong>Public IP</strong> = <strong>Disabled</strong> (Private Subnet이므로 공인 IP를 붙이지 않는다).</li>
+</ul>
+</li>
+<li><strong>Service discovery</strong> 섹션을 펼쳐 <strong>Use service discovery</strong>를 켠다.
+<ul>
+<li><strong>Configure namespace</strong> = <strong>Create a new namespace</strong>, 네임스페이스 이름 = <code>claude-gw.local</code>.</li>
+<li><strong>Service discovery name</strong> = <code>postgres</code>. (완성 이름이 <code>postgres.claude-gw.local</code>이 된다 — 단계 4 <code>postgres_url</code>과 일치.)</li>
+<li><strong>DNS record type</strong> = <strong>A</strong>. (Task가 <code>awsvpc</code> 네트워크 모드이므로 A 레코드를 쓴다. Task의 사설 IP가 이 이름으로 등록된다.)</li>
+</ul>
+</li>
+<li><strong>Create</strong>. Task가 <code>RUNNING</code>이 되면 Cloud Map에 IP가 등록된다.</li>
+</ol>
+<div class="callout">
+<strong>Service Discovery를 켜면 Route53 private hosted zone이 하나 더 생긴다.</strong>
+이 <code>claude-gw.local</code> zone은 Cloud Map이 관리하는 것으로, 단계 2에서 <em>직접</em> 만든 <code>internal.example.com</code>(게이트웨이 hostname용) zone과는 별개다. 둘은 용도가 다르다 — 하나는 서비스 간 내부 이름(<code>postgres.claude-gw.local</code>), 다른 하나는 랩탑이 접속하는 게이트웨이 이름(<code>claude-gw.internal.example.com</code>)이다.
+</div>
+
+<h2>4 · gateway Task Definition 작성 (비밀값 환경변수 주입)</h2>
+<p>
+gateway 이미지에는 <code>gateway.yaml</code>과 TLS 인증서가 이미 포함돼 있고, <code>gateway.yaml</code>은 비밀값을 <code>${ENV_VAR}</code> 참조로만 담고 있다. 실제 값은 여기 Task Definition의 <strong>환경변수로 런타임에 주입</strong>한다.
+</p>
+<ol>
+<li><strong>Task definitions</strong> → <strong>Create new task definition</strong>.</li>
+<li><strong>Task definition family</strong> = <code>claude-gw-gateway</code>.</li>
+<li><strong>Infrastructure requirements</strong>
+<ul>
+<li><strong>Launch type</strong> = <strong>AWS Fargate</strong>. <strong>Task size</strong> = 예: CPU <code>1 vCPU</code>, Memory <code>2 GB</code>.</li>
+<li><strong>Task role</strong> = gateway가 Bedrock을 호출하므로, <code>bedrock:InvokeModel</code>·<code>bedrock:InvokeModelWithResponseStream</code>을 가진 역할을 지정한다(단계 5 항목 3, 아래 callout 참고). <strong>Task execution role</strong> = <code>ecsTaskExecutionRole</code>.</li>
+</ul>
+</li>
+<li><strong>Container - 1</strong>
+<ul>
+<li><strong>Name</strong> = <code>gateway</code>.</li>
+<li><strong>Image URI</strong> = ECR에 push한 이미지 URI를 <strong>태그</strong>로 지정한다(<code>&lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com/claude-gateway:test</code>). 다이제스트(<code>@sha256:...</code>)로 지정하면 이후 같은 태그로 재빌드·push해도 ECS가 그 옛 다이제스트만 계속 pull해, 재배포가 반영되지 않는다.</li>
+<li><strong>Port mappings</strong> = 컨테이너 포트 <code>443</code>(<code>gateway.yaml</code>의 <code>listen.port</code> — 8080이 아니다, ALB 없이 게이트웨이가 직접 443을 종단하므로), TCP.</li>
+<li><strong>Environment variables</strong> — 아래 값을 각각 Key/Value로 추가한다. <strong>Value type = Value</strong>로 두고 값을 직접 입력한다.
+<table>
+<tr><th>Key</th><th>Value</th></tr>
+<tr><td><code>OIDC_CLIENT_SECRET</code></td><td>Cognito App Client의 secret</td></tr>
+<tr><td><code>GATEWAY_JWT_SECRET</code></td><td>세션 JWT 서명 키. <code>openssl rand -base64 32</code>로 생성한 값을 그대로 쓴다(최소 32바이트의 암호학적 난수 — 예측 가능한 값을 쓰면 세션 토큰이 위조될 수 있다). 예: <code>DLauvO0WLBxiRyPhiyHbi6ni2GyZHUbAFHD77S/L/Gg=</code> (예시일 뿐이므로 그대로 쓰지 말고 배포마다 새로 생성한다)</td></tr>
+<tr><td><code>GATEWAY_POSTGRES_URL</code></td><td><code>postgres://gateway:changeme123@postgres.claude-gw.local:5432/gateway</code> (2단계 <code>POSTGRES_USER</code>·<code>POSTGRES_PASSWORD</code>·<code>POSTGRES_DB</code>와 일치)</td></tr>
+</table>
+</li>
+</ul>
+</li>
+<li><strong>Create</strong>.</li>
+</ol>
+<div class="callout">
+<strong>Task Role의 Bedrock 권한은 <code>inference-profile</code> 리소스까지 포함해야 한다.</strong>
+최신 Claude 모델(예: Sonnet 4.5 이후)은 Bedrock에서 <strong>on-demand 직접 호출이 막혀 있고, cross-region inference profile을 거쳐야</strong> 한다(<code>ValidationException: ... Retry your request with the ID or ARN of an inference profile</code>). inference profile은 <code>foundation-model</code>과는 <strong>별도의 리소스 타입</strong>이라, <code>Resource</code>를 <code>foundation-model/*</code>로만 좁혀 두면 <code>bedrock:InvokeModel</code> 자체가 <code>implicitDeny</code>로 막혀 <code>403 upstream denied the request</code>가 난다. Task Role의 인라인 정책을 아래처럼 넓힌다(cross-region inference profile은 여러 리전의 foundation model로 라우팅되므로 그 리전들의 <code>foundation-model</code> 권한도 함께 필요하다).
+<pre><code>{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+      "Resource": [
+        "arn:aws:bedrock:us-east-1::foundation-model/*",
+        "arn:aws:bedrock:us-east-2::foundation-model/*",
+        "arn:aws:bedrock:us-west-2::foundation-model/*",
+        "arn:aws:bedrock:*:&lt;account-id&gt;:inference-profile/*"
+      ]
+    }
+  ]
+}</code></pre>
+</div>
+
+<div class="callout">
+<strong>이 방식은 secret이 Task Definition에 평문으로 남는다 — 테스트 한정이다.</strong>
+<code>Value type = Value</code>로 넣은 값은 <code>describe-task-definition</code>이나 콘솔에서 그대로 조회된다. 운영에서는 값을 Secrets Manager에 저장하고, 환경변수 대신 <strong>Value type = ValueFrom</strong>(콘솔의 "Add environment variable from" / Task Definition JSON의 <code>secrets</code>)으로 그 ARN을 참조한다. 이때 Task <strong>execution role</strong>에 <code>secretsmanager:GetSecretValue</code> 권한이 필요하고, ECS가 컨테이너 시작 시점에 값을 읽어 환경변수로 주입한다.
+</div>
+
+<h2>5 · gateway Service 생성</h2>
+<p>
+postgres와 같은 방식으로 gateway Service를 만든다. gateway는 내부에 이름을 노출할 필요가 없지만(랩탑은 Route53 private zone의 A 레코드로 접근한다), 같은 클러스터·같은 VPC에 두어 <code>postgres.claude-gw.local</code>을 resolve할 수 있게 한다.
+</p>
+<ol>
+<li><code>claude-gw-cluster</code> → <strong>Services</strong> → <strong>Create</strong>.</li>
+<li><strong>Launch type</strong> = <strong>Fargate</strong>.</li>
+<li><strong>Task definition</strong> = <code>claude-gw-gateway</code>, <strong>Service name</strong> = <code>gateway</code>, <strong>Desired tasks</strong> = <code>1</code>.</li>
+<li><strong>Networking</strong>
+<ul>
+<li><strong>VPC</strong> = 같은 VPC, <strong>Subnets</strong> = <strong>Private Subnet</strong>.</li>
+<li><strong>Security group</strong> = <strong>3단계의 <code>claude-gw-postgres-sg</code>를 실수로 재선택하지 않는다</strong> — 콘솔이 최근 만든 보안 그룹을 목록 위쪽에 보여줘 혼동하기 쉽다. gateway용으로 새로 만든다. 이름 = <code>claude-gw-gateway-sg</code>. Inbound rules는 다음과 같이 추가한다(랩탑이 게이트웨이에 HTTPS로 접근).
+<table>
+<tr><th>Type</th><th>Protocol</th><th>Port range</th><th>Source</th></tr>
+<tr><td>HTTPS</td><td>TCP</td><td><code>443</code></td><td>Custom → <code>172.16.0.0/22</code>(단계 0의 Client VPN 클라이언트 CIDR)</td></tr>
+</table>
+</li>
+<li><strong>Public IP</strong> = <strong>Disabled</strong>.</li>
+</ul>
+</li>
+<li><strong>Service discovery</strong>는 켜지 않아도 된다(gateway는 내부 이름으로 불릴 필요가 없다).</li>
+<li><strong>Create</strong>.</li>
+</ol>
+<div class="callout">
+<strong>보안 그룹 규칙은 양쪽을 맞춰 정리한다.</strong>
+<code>claude-gw-gateway-sg</code>가 만들어졌으면, 3단계 <code>claude-gw-postgres-sg</code>의 인바운드에 <strong><code>claude-gw-gateway-sg</code>로부터의 <code>5432</code></strong> 허용 규칙을 추가한다. 정리하면 — <code>claude-gw-postgres-sg</code>: <code>claude-gw-gateway-sg</code> → 5432 허용, <code>claude-gw-gateway-sg</code>: Client VPN CIDR → 443 허용. gateway가 Cognito·Bedrock·ECR로 나가는 아웃바운드는 NAT Gateway 경로를 쓴다(단계 2).
+</div>
+
+<h2>6 · A 레코드 연결 (hostname → gateway 사설 IP)</h2>
+<p>
+gateway Task가 <code>RUNNING</code>이 되면 사설 IP가 정해진다. 이 IP를 단계 2에서 만든 Route53 private hosted zone(<code>internal.example.com</code>)의 A 레코드(이름 = <code>claude-gw</code>)에 채운다. 이것으로 단계 0에서 이름만 정해 둔 <code>claude-gw.internal.example.com</code>이 실제 IP와 연결되고, VPN으로 들어온 랩탑이 이 이름을 사설 IP로 resolve한다. 자세한 절차는 <a href="setup-route53-private-zone.html">Route53 Private Zone 설정</a> 문서에 있다.
+</p>
+<div class="callout">
+<strong>gateway Task IP는 재배포 때 바뀐다.</strong>
+Fargate Task는 재배포·교체 시 사설 IP가 달라지므로, gateway를 재배포하면 이 A 레코드를 다시 채워야 한다. 매번 갱신이 번거로우면 gateway도 Service Discovery(<code>gateway.claude-gw.local</code>)로 등록하거나, 정석 구성에서는 ALB를 앞에 두어 고정 진입점을 만든다.
+</div>
+
+<h2>7 · 실행 확인</h2>
+<ol>
+<li>클러스터의 <strong>Tasks</strong> 탭에서 <code>postgres</code>·<code>gateway</code> Task가 모두 <code>RUNNING</code>인지 본다.</li>
+<li>gateway Task의 <strong>Logs</strong> 탭(CloudWatch)에서 기동 로그를 확인한다 — <code>${OIDC_CLIENT_SECRET}</code> 등이 값으로 치환돼 설정이 로드됐는지, DB 연결이 성공했는지 본다.</li>
+<li>DB 연결 오류가 나면 <code>postgres.claude-gw.local</code> resolve 여부부터 확인한다(<a href="setup-service-discovery.html">Service Discovery 설정</a> 5절의 resolve 확인 방법).</li>
+</ol>
+
+<div class="callout">
+<strong>막히면 여기부터.</strong>
+<ul>
+<li><strong>gateway가 DB에 못 붙음</strong> → postgres Task가 <code>RUNNING</code>인지, Cloud Map에 <code>postgres.claude-gw.local</code>이 등록됐는지, <code>claude-gw-postgres-sg</code>가 <code>claude-gw-gateway-sg</code>로부터의 5432를 허용하는지 확인한다.</li>
+<li><strong>gateway가 시작하다 secret 오류</strong> → gateway Task Definition의 환경변수 3개(<code>OIDC_CLIENT_SECRET</code>·<code>GATEWAY_JWT_SECRET</code>·<code>GATEWAY_POSTGRES_URL</code>)가 모두 있는지, 값이 정확한지 확인한다.</li>
+<li><strong>gateway Task가 <code>PROVISIONING</code>에서 멈추거나 이미지 pull 실패로 <code>STOPPED</code>됨</strong> → gateway는 ECR에서 이미지를 pull하는데, ECR도 VPC 엔드포인트가 없으면 NAT Gateway를 거쳐야 접근된다. Private Subnet의 라우팅이 NAT Gateway를 향하는지 확인한다(단계 2).</li>
+<li><strong>gateway가 뜬 뒤 Cognito·Bedrock 호출에서 실패</strong> → 마찬가지로 NAT Gateway 라우팅을 확인한다. Cognito·Bedrock 모두 VPC 엔드포인트를 제공하지 않아 이 아웃바운드도 NAT를 거친다.</li>
+<li><strong>랩탑에서 게이트웨이에 접속 불가</strong> → <code>claude-gw-gateway-sg</code>가 postgres SG를 잘못 재사용하고 있지 않은지, 실제로 Client VPN CIDR로부터의 443을 허용하는지, A 레코드가 현재 Task IP와 맞는지 확인한다. 보안 그룹이 맞는데 <code>ECONNREFUSED</code>가 나면 <code>gateway.yaml</code>의 <code>listen.port</code>와 위 Port mappings가 443으로 일치하는지 확인한다.</li>
+<li><strong>로그인은 되는데 모델 호출에서 <code>403 upstream denied the request</code></strong> → 위 Task Role callout대로 IAM 정책에 <code>inference-profile</code> 리소스가 포함돼 있는지, Bedrock 모델 액세스가 활성화됐는지 확인한다.</li>
+</ul>
+</div>
+
+<p class="source">
+출처: <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/create-cluster-console-v2.html" target="_blank">Creating an Amazon ECS cluster for Fargate workloads (공식 문서)</a>,
+<a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/create-service-console-v2.html" target="_blank">Creating an Amazon ECS rolling update deployment (공식 문서)</a>
+</p>
+<p>
+이 문서의 설정을 실제로 적용하며 마주친 문제(SG 재사용, 포트 불일치, IAM 리소스 범위)는 <a href="troubleshooting-log.html">트러블슈팅 로그</a>에 순서대로 기록돼 있다.
+</p>
+
+<div class="ask-agent">
+Secrets Manager로 비밀값을 주입하는 상세 절차나, gateway를 ALB 뒤에 두는 정석 구성이 필요하면 요청하세요.
+</div>
+
+<div class="nav-links">
+<span><a href="self-guide-aws.html">&larr; 실습 가이드</a></span>
+<span>ECS 설정</span>
+</div>
+
+</div>
+<script src="assets/nav.js"></script>
+</body>
+</html>

@@ -56,9 +56,19 @@ Cognito 콘솔(us-east-1)의 <strong>User pools</strong> 메뉴에서 <strong>Cr
 <li><strong>User Pool 이름 변경(선택)</strong> — 자동 생성된 기본 이름을 <code>claude-gw-pool</code> 등으로 바꾼다. 실습 식별을 쉽게 하기 위한 것이며 동작에는 영향이 없다.</li>
 <li><strong>이메일 자동 검증 활성화</strong> — 가입 시 이메일을 검증하게 해 사용자의 <code>email_verified</code>가 <code>true</code>가 되도록 한다. 게이트웨이는 이 값이 <code>true</code>가 아닌 사용자를 거부한다.</li>
 <li><strong>MFA = No MFA</strong> — 테스트 구성이므로 다단계 인증은 끈다. (운영 전환 시 켜는 것을 검토한다.)</li>
-<li><strong>Hosted UI(managed login) 도메인 생성</strong> — Cognito 도메인 방식으로 로그인 페이지 도메인을 만든다. 예: 도메인 접두어 <code>claude-gw-auth</code> → <code>https://claude-gw-auth.auth.us-east-1.amazoncognito.com</code>. 사용자가 실제로 아이디·비밀번호를 입력하는 OIDC 로그인 페이지가 이 도메인에서 열린다. 접두어는 리전 안에서 유일해야 하므로 이미 쓰이는 이름이면 다른 이름을 쓴다.</li>
+<li><strong>로그인 페이지 도메인 생성</strong> — 좌측 <strong>Branding</strong> 메뉴의 <strong>Domain</strong>에서, <strong>Actions → Create Cognito domain</strong>을 눌러 Cognito 도메인 방식으로 만든다. 도메인 접두어를 입력하면 로그인 페이지 주소가 정해진다. 예: 접두어 <code>claude-gw-auth</code> → <code>https://claude-gw-auth.auth.us-east-1.amazoncognito.com</code>. 사용자가 실제로 아이디·비밀번호를 입력하는 OIDC 로그인 페이지가 이 도메인에서 열린다. 접두어는 리전 안에서 유일해야 하므로 이미 쓰이는 이름이면 다른 이름을 쓴다. 도메인을 만들 때 <strong>Branding version</strong>을 선택하는데, <strong>Managed login</strong>(새 브랜딩 편집기)과 <strong>Hosted UI (classic)</strong> 중 하나다. 게이트웨이 연동은 어느 쪽이든 OIDC 로그인 페이지로 동일하게 작동하므로, 테스트에서는 요금제 제약이 없는 <strong>Hosted UI (classic)</strong>를 선택하면 된다. (Managed login은 <code>Lite</code>가 아닌 feature plan(Essentials 또는 Plus, 유료)에서만 쓸 수 있어 <code>Lite</code> 사용 시 콘솔이 요금제 업그레이드를 요구한다.)</li>
 <li><strong>App Client 확인</strong> — Traditional web application이면 <strong>client secret이 이미 생성</strong>돼 있다. App Client 상세에서 콜백 URL이 <code>https://&lt;gateway-hostname&gt;/oauth/callback</code>인지도 확인한다.</li>
+<li><strong>App Client의 Hosted UI 설정을 확인한다</strong> — App Client 상세 → <strong>Login pages configuration</strong> → <strong>Edit</strong>에서 아래 두 가지를 반드시 확인한다. 둘 중 하나라도 빠지면 로그인 화면 진입 전에 에러가 난다.
+<ul>
+<li><strong>Identity providers</strong>에 <strong>Cognito user pool</strong>이 체크돼 있어야 한다. 이게 비어 있으면(<code>SupportedIdentityProviders</code>가 빈 상태) Hosted UI가 <code>Invalid request. Please check your input and try again.</code>라는 일반 에러만 보여주고 로그인 폼 자체를 띄우지 않는다.</li>
+<li><strong>OAuth 2.0 grant types = Authorization code grant</strong>, <strong>OpenID Connect scopes</strong>에 <strong><code>OpenID</code>·<code>Email</code>·<code>Profile</code></strong>을 체크한다. <code>Profile</code>을 빠뜨리면 게이트웨이가 표준 OIDC 클라이언트로서 요청하는 scope와 어긋나 <code>invalid_scope</code>로 거부된다. <strong><code>offline_access</code>에 대응하는 항목은 켜지 않는다</strong> — Cognito 자체가 이 scope를 지원하지 않으므로(아래 callout 참고), 켜는 옵션도 없다.</li>
+</ul>
+</li>
 </ol>
+<div class="callout">
+<strong>Cognito는 <code>offline_access</code> scope를 지원하지 않는다 — <code>gateway.yaml</code>에서도 빼야 한다.</strong>
+게이트웨이는 refresh token을 받기 위해 기본적으로 <code>openid profile email offline_access</code>를 요청하는데, Cognito가 허용하는 scope는 <code>openid</code>·<code>email</code>·<code>phone</code>·<code>profile</code>·<code>aws.cognito.signin.user.admin</code>뿐이다. 위에서 <code>Profile</code>까지 체크했다면(App Client의 <code>AllowedOAuthScopes</code>), <code>gateway.yaml</code>의 <code>oidc.scopes</code>도 정확히 그 목록(<code>[openid, profile, email]</code>)으로 override해야 한다 — 안 하면 게이트웨이가 여전히 기본값(<code>offline_access</code> 포함)을 요청해 Cognito가 로그인 화면에 닿기도 전에 <code>invalid_request: invalid_scope</code>로 거부한다. 자세한 설정은 <a href="self-guide-aws.html">실습 가이드</a> 단계 4에 있다. refresh token이 없어지는 대신, 게이트웨이의 <code>session.ttl_hours</code>를 늘려 재로그인 빈도를 줄인다.
+</div>
 
 <div class="callout">
 <strong>Cognito는 공개 엔드포인트라 브라우저 도달 문제가 없다.</strong>
@@ -69,6 +79,17 @@ Cognito 콘솔(us-east-1)의 <strong>User pools</strong> 메뉴에서 <strong>Cr
 <p>
 개요 화면의 <strong>Users</strong>에서 테스트 사용자 1명을 만든다. 이때 <strong>email 검증 상태</strong>로 만들어야 한다 — <code>email_verified: true</code>가 아니면 게이트웨이가 로그인을 거부한다. 콘솔에서 사용자를 만든 뒤 속성에서 <code>email_verified</code>를 <code>true</code>로 표시하거나, 2단계의 이메일 자동 검증 흐름으로 검증을 마친다.
 </p>
+<div class="callout">
+<strong>콘솔에서 만든 사용자는 <code>FORCE_CHANGE_PASSWORD</code> 상태로 시작한다.</strong>
+콘솔의 <strong>Create user</strong>로 만들면 임시 비밀번호가 발급되고, 사용자 상태가 <code>FORCE_CHANGE_PASSWORD</code>로 남는다. 이 상태에서 Hosted UI로 로그인하면 새 비밀번호 설정 화면이 나와야 하는데, 정상적으로 처리되지 않으면 <strong>"Sign-in failed"</strong>로 실패한다. 테스트 목적이면 <code>admin-set-user-password</code>에 <code>--permanent</code>를 줘서 이 절차를 건너뛰고 바로 정식 비밀번호를 지정하는 게 확실하다.
+<pre><code>aws cognito-idp admin-set-user-password \
+  --user-pool-id &lt;pool-id&gt; \
+  --username &lt;사용자의 sub 또는 username&gt; \
+  --password '&lt;원하는 영구 비밀번호&gt;' \
+  --permanent \
+  --region us-east-1</code></pre>
+비밀번호는 User Pool의 비밀번호 정책(기본: 최소 8자, 대소문자·숫자·특수문자 포함)을 만족해야 한다. 실행 후 사용자 상태가 <code>CONFIRMED</code>로 바뀐다.
+</div>
 
 <h2>4 · 게이트웨이에 넘길 값 메모</h2>
 <p>
@@ -86,12 +107,18 @@ Cognito 콘솔(us-east-1)의 <strong>User pools</strong> 메뉴에서 <strong>Cr
 <li><strong>로그인은 됐는데 게이트웨이가 사용자를 거부</strong> → 테스트 사용자의 <code>email_verified</code>가 <code>true</code>인지 확인한다.</li>
 <li><strong>게이트웨이가 client secret 관련 오류</strong> → App Client가 Traditional web application(secret 포함) 유형인지, <code>OIDC_CLIENT_SECRET</code>이 실제 secret과 일치하는지 확인한다.</li>
 <li><strong>콜백 오류(redirect mismatch)</strong> → App Client의 콜백 URL이 <code>https://&lt;gateway-hostname&gt;/oauth/callback</code>과 정확히 일치하는지 확인한다.</li>
+<li><strong><code>invalid_request: invalid_scope</code></strong> → App Client의 <strong>OpenID Connect scopes</strong>(<code>AllowedOAuthScopes</code>)와 <code>gateway.yaml</code>의 <code>oidc.scopes</code>가 정확히 일치하는지, 특히 <code>offline_access</code>가 양쪽 모두에서 빠졌는지 확인한다.</li>
+<li><strong><code>Invalid request. Please check your input and try again.</code></strong> → App Client의 <strong>Identity providers</strong>에 <strong>Cognito user pool</strong>이 체크돼 있는지 확인한다.</li>
+<li><strong>"Sign-in failed"</strong> → 테스트 사용자가 <code>FORCE_CHANGE_PASSWORD</code> 상태로 남아 있는지 확인한다. <code>admin-set-user-password --permanent</code>로 영구 비밀번호를 지정한다.</li>
 </ul>
 </div>
 
 <p class="source">
 출처: <a href="https://docs.aws.amazon.com/cognito/latest/developerguide/getting-started-user-pools-application.html" target="_blank">Create a new application in the Amazon Cognito console (공식 문서)</a>,
 <a href="https://docs.aws.amazon.com/help-panel/cognito/latest/console/hp-cognito-user-pool-sign-in-options.html" target="_blank">Cognito user pool sign-in options (공식 문서)</a>
+</p>
+<p>
+이 문서의 설정을 실제로 적용하며 마주친 문제(scope 불일치, identity provider 누락, 임시 비밀번호 상태)는 <a href="troubleshooting-log.html">트러블슈팅 로그</a>에 순서대로 기록돼 있다.
 </p>
 
 <div class="ask-agent">

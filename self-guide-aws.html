@@ -85,7 +85,7 @@ PostgreSQL을 관리형 RDS 대신 <strong>별도 Fargate 컨테이너</strong>�
   <rect class="z-task" x="598" y="228" width="440" height="92" rx="8"></rect>
   <text class="zlbl" x="613" y="248" fill="#e8590c">ECS Fargate Task — gateway</text>
   <rect class="box b-gw" x="620" y="256" width="396" height="56" rx="8"></rect>
-  <text class="lbl" x="818" y="278" text-anchor="middle">claude gateway :8080 (native)</text>
+  <text class="lbl" x="818" y="278" text-anchor="middle">claude gateway :443 (native)</text>
   <text class="elbl" x="818" y="296" text-anchor="middle">listen.tls로 HTTPS 직접 종단</text>
 
   <!-- Postgres Task (별도) -->
@@ -216,27 +216,29 @@ zone 도메인 이름에는 게이트웨이 hostname 전체(<code>claude-gw.inte
 <li>mutual TLS 인증 — easy-rsa로 CA·서버·클라이언트 인증서를 만들고, <strong>서버 인증서를 us-east-1 ACM에 업로드</strong>한다.</li>
 <li>엔드포인트의 <strong>클라이언트 CIDR = <code>172.16.0.0/22</code></strong>(단계 0), <strong>Private Subnet에 연결</strong>, <strong>VPC CIDR 허용 규칙</strong> 추가.</li>
 <li><strong>DNS 서버 = VPC Route53 Resolver(<code>10.0.0.2</code>)</strong> — 이래야 랩탑이 게이트웨이 hostname을 사설 IP로 resolve한다(가장 자주 누락되는 항목).</li>
+<li><strong>Split-tunnel을 켠다.</strong> 기본값(풀 터널)로 두면 Cognito 로그인 화면 같은 인터넷 목적지로 가는 트래픽까지 VPN으로 잡혀, VPC CIDR만 허용된 Authorization rule·route table에서 조용히 드롭된다 — 디바이스 인증 코드를 입력해도 반응이 없는 것으로 나타난다. 자세한 내용은 <a href="setup-client-vpn.html">Client VPN 설정</a> 문서에 있다.</li>
 </ul>
 
 <h2>단계 4 · gateway.yaml</h2>
 <p><em>선행: 단계 0의 hostname, 단계 1의 Cognito 값.</em> 이 설정 파일을 먼저 작성해야 다음 단계에서 gateway 이미지를 빌드·배포할 수 있다. postgres를 가리키는 Cloud Map 이름(<code>postgres.claude-gw.local</code>)은 우리가 정하는 규칙이므로, 배포 전이라도 미리 확정해 여기에 쓴다.</p>
 <pre><code>listen:
   host: 0.0.0.0
-  port: 8080
-  public_url: https://&lt;gateway-hostname&gt;      # 랩탑 CLI·브라우저가 접근하는 이름
+  port: 443                                    # ALB 없이 게이트웨이가 직접 443을 종단 (8080이 아니다 — 아래 callout 참고)
+  public_url: https://&lt;gateway-hostname&gt;      # 랩탑 CLI·브라우저가 접근하는 이름 (포트 표기 없음 → 443 가정)
   tls:                                         # 게이트웨이가 직접 HTTPS 종단
-    cert_file: /etc/claude/tls/cert.pem
-    key_file: /etc/claude/tls/key.pem
+    cert: /etc/claude/tls/cert.pem
+    key: /etc/claude/tls/key.pem
 
 oidc:
   issuer: https://cognito-idp.us-east-1.amazonaws.com/&lt;pool-id&gt;
   client_id: &lt;cognito-app-client-id&gt;
   client_secret: ${OIDC_CLIENT_SECRET}
+  scopes: [openid, profile, email]             # offline_access 제외 — Cognito가 미지원 (아래 callout 참고)
   allowed_email_domains: [&lt;your-domain&gt;]
 
 session:
   jwt_secret: ${GATEWAY_JWT_SECRET}
-  ttl_hours: 1
+  ttl_hours: 8                                 # offline_access 없이는 refresh token이 없어, 짧으면 재로그인이 잦다
 
 store:
   # 별도 postgres Task를 Cloud Map 이름으로 가리킨다 (localhost 아님)
@@ -245,27 +247,45 @@ store:
 upstreams:
   - provider: bedrock
     region: us-east-1
-    auth: {}                                   # 비우면 Task Role 사용
-    auto_include_builtin_models: true</code></pre>
+    auth: {}                                   # 비우면 Task Role 사용</code></pre>
 <p>
 이 <code>gateway.yaml</code>과 TLS 인증서를 gateway 컨테이너 이미지에 포함하는 방법은 <a href="build-images.html">이미지 준비</a>에서 다룬다.
 </p>
 
+<div class="callout">
+<strong><code>listen.port</code>는 443이어야 한다 — 8080으로 두면 접속이 거부된다.</strong>
+이 구성은 ALB 같은 리버스 프록시가 없어 게이트웨이 프로세스가 직접 443을 종단해야 한다. Fargate <code>awsvpc</code> 모드는 컨테이너 포트가 곧 ENI 포트라 별도 포트 매핑이 없고, <code>public_url</code>과 클라이언트 접속 URL도 포트를 표기하지 않아 기본값 443을 가정한다. <code>listen.port</code>를 8080으로 두면 보안 그룹은 443을 열어 둬도 그 포트에 아무것도 리스닝하지 않아 <code>ECONNREFUSED</code>로 거부된다. Dockerfile은 root로 실행되므로(<a href="build-images.html">이미지 준비</a> 참고) 443 바인딩에 권한 문제는 없다.
+</div>
+
+<div class="callout">
+<strong>Cognito는 <code>offline_access</code> scope를 지원하지 않는다.</strong>
+게이트웨이는 refresh token을 받기 위해 기본적으로 <code>openid profile email offline_access</code>를 요청하는데, Cognito가 허용하는 scope는 <code>openid</code>·<code>email</code>·<code>phone</code>·<code>profile</code>·<code>aws.cognito.signin.user.admin</code>뿐이라 <code>offline_access</code>를 포함하면 로그인 화면에 닿기도 전에 <code>invalid_scope</code>로 거부된다(Cognito는 이 scope 없이도 authorization code grant에서 refresh token을 자동 발급한다). 위처럼 <code>oidc.scopes</code>로 명시적으로 override해야 하고, 이 목록은 <a href="setup-cognito.html">Cognito 설정</a>에서 만드는 App Client의 <strong><code>AllowedOAuthScopes</code>와 정확히 일치</strong>해야 한다. refresh token이 없어지는 대신 <code>session.ttl_hours</code>를 늘려 재로그인 빈도를 줄인다.
+</div>
+
+<div class="callout">
+<strong>이미지 버전에 따라 설정 스키마가 바뀔 수 있다.</strong>
+<code>listen.tls</code>의 필드명은 <code>cert_file</code>·<code>key_file</code>에서 <code>cert</code>·<code>key</code>로 바뀌었고, <code>upstreams</code> 항목의 <code>auto_include_builtin_models</code>는 제거됐다(사용하는 gateway 이미지 버전 기준). 애플리케이션이 시작 시점에 설정을 엄격하게 검증하므로, 옛 필드명이나 제거된 키가 남아 있으면 <strong>Exit Code 1로 즉시 종료</strong>한다. 배포 후 gateway Task가 뜨지 않으면 CloudWatch 로그에서 스키마 검증 오류(<code>Required</code>·<code>Unrecognized keys</code>)부터 확인하고, 쓰는 이미지 버전의 설정 스키마와 이 예시를 대조한다.
+</div>
+
 <h2>단계 5 · Fargate — gateway·postgres 별도 Task</h2>
 <p>
-<em>선행: 단계 4의 <code>gateway.yaml</code>, <a href="build-images.html">이미지 준비</a>에서 만든 두 컨테이너 이미지, 단계 1의 Cognito 값, 단계 2의 서브넷.</em> gateway와 postgres를 <strong>별도의 ECS Task</strong>로 분리한다.
+<em>선행: 단계 4의 <code>gateway.yaml</code>, <a href="build-images.html">이미지 준비</a>에서 만든 두 컨테이너 이미지, 단계 1의 Cognito 값, 단계 2의 서브넷.</em> gateway와 postgres를 <strong>별도의 ECS Task</strong>로 분리한다. 클러스터 생성부터 두 Service 배포·환경변수 주입·보안 그룹까지의 콘솔 절차는 <a href="setup-ecs-cluster.html">ECS 설정</a> 문서에서 다룬다. 요지만 정리하면:
 </p>
 <ol>
 <li><strong>postgres Task/Service</strong> — <code>postgres:16</code> 이미지를 ECS Service로 띄우고 Private Subnet에 배치한다. 서비스 생성 화면의 <strong>Service Discovery 설정</strong>에서 네임스페이스 이름(<code>claude-gw.local</code>)과 서비스 이름(<code>postgres</code>)을 입력하면, <strong>ECS가 Cloud Map private DNS namespace를 자동으로 생성</strong>하고 이 Task를 <code>postgres.claude-gw.local</code>로 등록한다(단계 4의 <code>postgres_url</code>과 일치). 즉 Cloud Map을 별도로 먼저 만들 필요가 없다.</li>
 <li><strong>gateway Task/Service</strong> — <a href="build-images.html">이미지 준비</a>에서 ECR에 올린 gateway 이미지로 ECS Service를 띄운다. 위 postgres와 <strong>같은 네임스페이스(<code>claude-gw.local</code>)</strong>를 지정해, 게이트웨이가 <code>postgres.claude-gw.local</code>로 DB를 찾게 한다. (이 이미지에는 단계 4의 <code>gateway.yaml</code>과 TLS 인증서가 이미 포함돼 있어 <code>listen.tls</code>로 HTTPS를 직접 종단한다.)</li>
-<li><strong>Task Role</strong>(gateway)에 <code>bedrock:InvokeModel</code> 등 Bedrock 호출 권한 부여</li>
-<li><strong>보안 그룹</strong> — postgres SG는 gateway SG로부터의 5432를 허용하고, gateway SG는 Client VPN 클라이언트 CIDR로부터의 443을 허용한다.</li>
+<li><strong>Task Role</strong>(gateway)에 <code>bedrock:InvokeModel</code>·<code>bedrock:InvokeModelWithResponseStream</code> 권한을 부여한다. <strong>최신 Claude 모델은 on-demand 직접 호출이 막혀 있어 cross-region inference profile을 거쳐야</strong> 하므로, <code>Resource</code>에 <code>foundation-model/*</code>뿐 아니라 <code>inference-profile/*</code>도 포함해야 한다 — 이 둘은 서로 다른 리소스 타입이라 하나만 허용하면 <code>InvokeModel</code> 자체가 <code>403</code>으로 거부된다(<a href="setup-ecs-cluster.html">ECS 설정</a> 문서에 정확한 정책 예시가 있다).</li>
+<li><strong>보안 그룹</strong> — postgres SG는 gateway SG로부터의 5432를 허용하고, gateway SG는 Client VPN 클라이언트 CIDR로부터의 443을 허용한다. gateway Service를 만들 때 <strong>postgres용 보안 그룹을 실수로 재사용하지 않도록</strong> 주의한다 — SG 이름과 인바운드 규칙을 다시 확인한다.</li>
 <li>비밀값 주입: <code>OIDC_CLIENT_SECRET</code>·<code>GATEWAY_JWT_SECRET</code>·<code>GATEWAY_POSTGRES_URL</code>·admin 키 (테스트면 Task Definition 환경변수 직접 주입도 가능)</li>
 <li>gateway Task의 사설 IP가 정해지면, <strong>단계 2에서 만든 private hosted zone에 A 레코드를 채운다</strong>(hostname → 이 사설 IP). 이것으로 단계 0에서 이름만 정해 둔 hostname이 실제 IP와 연결된다.</li>
 </ol>
 <div class="callout">
 <strong>별도 Task라 gateway 재배포에도 상태가 유지된다.</strong>
 사이드카(같은 Task) 방식과 달리, gateway만 재시작해도 postgres Task는 살아 있어 로그인·세션 상태가 보존된다. 다만 postgres 컨테이너 자체가 교체되면(재배포·장애) 상태는 사라지므로, 영속 저장이 필요하면 EFS 볼륨을 붙이거나 RDS로 전환한다.
+</div>
+<div class="callout">
+<strong>Task Definition의 이미지는 태그로 참조한다 — 다이제스트로 고정하면 재배포가 반영되지 않는다.</strong>
+이미지 필드를 <code>...claude-gateway@sha256:...</code>처럼 다이제스트로 고정해 두면, 이후 같은 태그로 이미지를 다시 빌드·push해도 ECS는 그 옛 다이제스트만 계속 pull한다(태그가 새 다이제스트로 옮겨간 것과 무관하게). <code>...claude-gateway:test</code>처럼 <strong>태그로 참조</strong>해야 <code>update-service --force-new-deployment</code>가 최신 이미지를 실제로 가져온다.
 </div>
 
 <h2>단계 6 · 클라이언트(랩탑) 설정</h2>
@@ -283,6 +303,13 @@ upstreams:
   "forceLoginGatewayUrl": "https://&lt;gateway-hostname&gt;"
 }</code></pre>
 </li>
+<li><strong>자체 서명 TLS 인증서를 Claude Code CLI(Node.js)의 CA 목록에 추가한다.</strong> 게이트웨이는 <a href="build-images.html">이미지 준비</a> 2단계에서 만든 자체 서명 인증서로 HTTPS를 종단하는데, Node.js는 랩탑 OS의 트러스트스토어를 쓰지 않고 자체 CA 목록만 검증에 사용하므로, 인증서를 OS 키체인에 등록해도 소용없다 — 등록하지 않으면 <code>self signed certificate</code> 에러로 <code>/login</code>이 실패한다. 그 인증서의 공개 부분(<code>tls/cert.pem</code>, 개인키인 <code>key.pem</code>은 필요 없음)을 랩탑으로 옮기고, <code>~/.claude/settings.json</code>에 <code>NODE_EXTRA_CA_CERTS</code>로 등록한다.
+<pre><code>{
+  "env": {
+    "NODE_EXTRA_CA_CERTS": "/절대/경로/claude-gw-cert.pem"
+  }
+}</code></pre>
+JSON 문법이 깨지면(쉼표·중괄호 누락) 조용히 무시되므로, <code>python3 -c "import json,sys; json.load(open('...'))"</code> 등으로 파싱이 되는지 확인한다.</li>
 </ol>
 
 <h2>단계 7 · 로그인·추론 테스트 (성공 판정)</h2>
@@ -301,14 +328,24 @@ upstreams:
 </p>
 
 <h2>막히면 여기부터 확인</h2>
+<p>
+아래는 흔한 증상별 1차 점검 목록이다. 이 실습을 실제로 진행하며 마주친 문제와 그 조치 과정을 순서대로 기록한 <a href="troubleshooting-log.html">트러블슈팅 로그</a>도 함께 참고한다 — 특히 아래 여러 항목이 겹쳐 나타나는 경우, 그 로그가 어느 순서로 좁혀가야 하는지 보여준다.
+</p>
 <ul>
-<li><strong>hostname resolve 실패</strong> — <code>nslookup</code>이 사설 IP를 안 주면, Client VPN의 DNS가 VPC Route53 Resolver로 설정됐는지, private hosted zone에 A 레코드가 있는지 확인한다.</li>
-<li><strong>VPN 연결됐는데 게이트웨이 접근 불가</strong> — Client VPN authorization rule에 VPC CIDR 허용이 있는지, gateway SG가 클라이언트 CIDR의 443을 허용하는지 확인한다.</li>
+<li><strong>hostname resolve 실패(<code>NXDOMAIN</code>)</strong> — <code>nslookup</code>이 사설 IP를 안 주면, Client VPN의 DNS가 VPC Route53 Resolver로 설정됐는지, private hosted zone에 A 레코드가 있는지 확인한다. gateway ECS Service에 Service Discovery(<code>serviceRegistries</code>)가 실제로 연결돼 있는지도 확인한다 — postgres만 연결하고 gateway는 빠뜨리기 쉽다.</li>
+<li><strong>DNS는 되는데 접속이 타임아웃난다</strong> — gateway SG가 postgres용 SG를 잘못 재사용하고 있지 않은지 확인한다. Client VPN authorization rule에 VPC CIDR 허용이 있는지, gateway SG가 클라이언트 CIDR의 443을 허용하는지도 확인한다.</li>
+<li><strong><code>ECONNREFUSED &lt;IP&gt;:443</code></strong> — 타임아웃과 다른 신호다. 보안 그룹은 맞는데 <code>gateway.yaml</code>의 <code>listen.port</code>가 8080으로 남아 있어 443에 리스너가 없는 경우다. 위 단계 4의 callout대로 443으로 맞춘다.</li>
+<li><strong>TLS 인증서 에러</strong> — <code>self signed certificate</code>면 랩탑에 <code>NODE_EXTRA_CA_CERTS</code>가 제대로 설정됐는지(단계 6) 확인한다. <code>does not match certificate's altnames</code>면 인증서 발급 시 <code>&lt;gateway-hostname&gt;</code> placeholder를 실제 값으로 바꾸지 않은 것이다 — <a href="build-images.html">이미지 준비</a> 2단계를 다시 확인한다.</li>
+<li><strong>디바이스 코드 입력 후 반응 없음</strong> — Client VPN이 풀 터널이라 Cognito(인터넷) 트래픽이 드롭되는 경우다. split-tunnel을 켠다(단계 3).</li>
 <li><strong>게이트웨이가 DB 연결 실패</strong> — <code>GATEWAY_POSTGRES_URL</code>의 Cloud Map 이름이 맞는지, postgres SG가 gateway SG의 5432를 허용하는지 확인한다.</li>
 <li><strong>사설 IP 거부</strong> — 게이트웨이 hostname이 공개 IP로 resolve되면 <code>/login</code>이 거부된다. 사설 IP로 풀리는지 확인한다.</li>
+<li><strong><code>invalid_request: invalid_scope</code></strong> — Cognito는 <code>offline_access</code>를 지원하지 않는다. <code>gateway.yaml</code>의 <code>oidc.scopes</code>가 <code>[openid, profile, email]</code>로 override됐는지, Cognito App Client의 <code>AllowedOAuthScopes</code>가 정확히 그 목록을 포함하는지 확인한다.</li>
+<li><strong><code>Invalid request. Please check your input and try again.</code></strong> — Cognito App Client의 <code>SupportedIdentityProviders</code>에 <code>COGNITO</code>가 포함돼 있는지 확인한다(<a href="setup-cognito.html">Cognito 설정</a>).</li>
+<li><strong>로그인 화면에서 "Sign-in failed"</strong> — 테스트 사용자가 <code>FORCE_CHANGE_PASSWORD</code> 상태로 남아 있는지 확인한다. <code>admin-set-user-password --permanent</code>로 정식 비밀번호를 지정한다.</li>
 <li><strong>로그인 콜백 실패</strong> — <code>public_url</code>과 Cognito에 등록한 <code>redirect_uri</code>가 정확히 일치하는지 확인한다.</li>
 <li><strong>토큰 검증 실패</strong> — gateway Task가 NAT를 통해 Cognito로 나가는지, 테스트 사용자의 <code>email_verified</code>가 true인지 확인한다.</li>
-<li><strong>모델 호출 실패</strong> — Bedrock 모델 액세스가 활성화됐는지, Task Role에 <code>bedrock:InvokeModel</code>이 있는지 확인한다.</li>
+<li><strong>로그인은 되는데 모델 호출에서 <code>403 upstream denied the request</code></strong> — Bedrock 모델 액세스가 활성화됐는지 확인하고, Task Role의 <code>bedrock:InvokeModel</code> 권한이 <code>inference-profile</code> 리소스까지 포함하는지 확인한다(단계 5 callout, <a href="setup-ecs-cluster.html">ECS 설정</a>) — 최신 Claude 모델은 <code>foundation-model</code> 권한만으로는 호출할 수 없다.</li>
+<li><strong>이미지를 재빌드·push해도 반영이 안 된다</strong> — Task Definition의 이미지가 태그가 아니라 다이제스트로 고정돼 있지 않은지 확인한다(단계 5 callout).</li>
 </ul>
 
 <h2>정석 구성으로 전환하는 지점</h2>
