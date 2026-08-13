@@ -74,18 +74,12 @@ Lesson 2에서 <code>gateway.yaml</code>의 각 설정 블록이 맡는 역할�
 
 <h2>1단계. 로그인 (디바이스 인증 플로우)</h2>
 <p>
-개발자가 터미널에서 <code>/login</code>을 실행하면 CLI는 게이트웨이에 디바이스 인증을 요청하고, 게이트웨이는 짧은 사용자 코드와 확인용 URL을 돌려준다. 개발자가 그 URL을 브라우저에서 열어 확인 페이지에서 사용자 코드를 입력하면, 게이트웨이가 브라우저를 회사 IdP의 로그인 화면으로 리다이렉트하고, 로그인이 끝나면 IdP가 게이트웨이의 <code>/oauth/callback</code>으로 인증 결과를 전달한다. 그동안 CLI는 짧은 간격으로 로그인 완료 여부를 게이트웨이에 물으며 대기한다(polling).
-</p>
-<p>
-이 방식(디바이스 인증 플로우, RFC 8628 device authorization grant)을 쓰는 이유는 터미널과 브라우저가 서로 다른 기기일 수 있기 때문이다. 예를 들어 SSH로 접속한 원격 서버에서 <code>/login</code>을 실행하고, 확인은 자신의 노트북 브라우저에서 하는 구성이 가능하다.
-</p>
-<p>
-개발자가 확인 페이지에서 코드를 제출하면 게이트웨이가 그 코드를 검증한 뒤 브라우저를 IdP로 리다이렉트한다. 이 리다이렉트가 실제로 어떻게 일어나는지(<code>302</code>·<code>Location</code>·<code>redirect_uri</code>), 목적지가 <code>issuer</code> 자체가 아닌 이유, 코드 교환과 PKCE 같은 상세는 <a href="0004-device-auth-flow.html">디바이스 인증 플로우 자세히</a>에서 다룬다.
+개발자가 터미널에서 <code>/login</code>을 실행하면, CLI와 브라우저가 각자 다른 일을 맡는 디바이스 인증 플로우(RFC 8628 device authorization grant)가 시작된다. 게이트웨이가 내려준 확인 URL을 개발자가 브라우저에서 열어 사용자 코드를 입력하면, 게이트웨이는 브라우저에 회사 IdP 로그인 화면으로 이동하라는 응답을 보내고, 브라우저는 그 응답에 따라 스스로 이동해 로그인 화면을 띄운다. 그동안 CLI는 짧은 간격으로 로그인 완료 여부를 물으며 대기한다(polling). 코드 발급·리다이렉트·콜백이 실제로 어떻게 이뤄지는지는 <a href="0004-device-auth-flow.html">디바이스 인증·로그인·세션 확립 자세히</a>에서 다룬다.
 </p>
 
 <h2>2단계. 세션 확립</h2>
 <p>
-IdP 로그인이 성공하면 게이트웨이는 IdP가 발급한 <code>id_token</code>을 검증해 그 안에 담긴 사용자의 이메일과 그룹 정보를 꺼내 PostgreSQL에 로그인 상태를 기록하고, 단기 세션 토큰(JWT)을 발급한다. <code>id_token</code>에서 이 값을 추출하는 상세 과정은 <a href="0004-device-auth-flow.html">디바이스 인증 플로우 자세히</a>에서 다룬다. polling 중이던 CLI는 이 토큰을 받아 대기를 끝낸다. 이 시점 이후로 CLI는 원본 IdP 자격증명이 아니라 이 세션 토큰만으로 게이트웨이와 통신한다.
+IdP 로그인이 끝나면 게이트웨이가 세션 토큰(JWT)을 발급하고 로그인 상태를 PostgreSQL에 기록한다. polling 중이던 CLI는 이 토큰을 받아 대기를 끝내고, 이 시점 이후로는 원본 IdP 자격증명이 아니라 이 세션 토큰만으로 게이트웨이와 통신한다. <code>id_token</code> 검증과 이메일·그룹 추출 같은 상세 과정은 <a href="0004-device-auth-flow.html">디바이스 인증·로그인·세션 확립 자세히</a>에서 다룬다.
 </p>
 
 <h2>3단계. 요청별 정책 적용</h2>
@@ -106,18 +100,20 @@ CLI가 무언가를 요청할 때마다 세션 토큰이 함께 전송된다. �
 
 <h2>4단계. 추론 요청 전달</h2>
 <p>
-개발자가 실제로 Claude에게 질문하면 CLI는 항상 동일한 Anthropic Messages API 형식으로 게이트웨이에 요청을 보낸다. 게이트웨이는 이 요청이 정책상 허용된 모델인지 먼저 검사하고, 허용되지 않으면 400 응답을 돌려준다. 통과하면 <code>upstreams</code>에 등록된 대상에 맞는 형식으로 번역해 전달하고, 응답이 오면 다시 CLI가 이해하는 형식으로 돌려준다. 이 과정에서 CLI는 요청이 어느 업스트림으로 갔는지 알 필요가 없으며, 번역과 라우팅은 전부 게이트웨이가 대신한다.
+개발자가 실제로 Claude Code에 질문하면 CLI는 항상 동일한 Anthropic Messages API 형식으로, 2단계에서 발급받은 세션 토큰을 <code>Authorization: Bearer</code> 헤더에 실어 게이트웨이에 요청을 보낸다. 게이트웨이는 이 요청이 정책상 허용된 모델인지(<code>managed.policies[].cli.availableModels</code>) 먼저 검사하고, 허용되지 않으면 400 응답을 돌려준다. 통과하면 <code>upstreams</code>에 등록된 대상에 맞는 형식으로 번역해 전달하고, 응답이 오면 다시 CLI가 이해하는 형식으로 돌려준다. 이 과정에서 CLI는 요청이 어느 업스트림으로 갔는지 알 필요가 없으며, 번역과 라우팅은 전부 게이트웨이가 대신한다.
 </p>
 
 <div class="callout">
-<strong>"번역"이 실제로 바꾸는 것 — 단, "Messages API=API 키" · "Bedrock=InvokeModel·SigV4"라는 대응은 고정된 사실이 아니다.</strong>
+<strong>"번역"이 실제로 바꾸는 것.</strong>
 CLI가 보내는 <strong>Anthropic Messages API</strong> 형식과 Bedrock의 <strong><code>InvokeModel</code></strong> API를 비교하면, 요청 바디의 필드(<code>messages</code>, <code>system</code>, <code>max_tokens</code> 등)는 대부분 그대로다. 차이는 두 가지뿐이다 — ① 최상위 <code>model</code> 필드가 바디 안에 없고 <code>InvokeModel</code> 호출 자체의 <code>modelId</code> 파라미터로 대신 지정되며, ② Bedrock 전용 필드 <code>anthropic_version: "bedrock-2023-05-31"</code>이 추가로 필요하다.
 <br><br>
-<strong>Messages API는 API 키만 쓰지 않는다.</strong> <code>x-api-key</code>(<code>ANTHROPIC_API_KEY</code>) 외에도 <strong>OAuth Bearer 토큰</strong>(<code>Authorization: Bearer</code>) — 구독 로그인(<code>/login</code>), <code>ANTHROPIC_AUTH_TOKEN</code>, Workload Identity Federation 등 — 을 지원한다. API 키는 여러 인증 방식 중 하나다.
+<strong>Messages API가 지원하는 인증 방식은 API 키 하나만이 아니다.</strong> <code>x-api-key</code>(<code>ANTHROPIC_API_KEY</code>) 외에도 <strong>OAuth Bearer 토큰</strong>(<code>Authorization: Bearer</code>) — 구독 로그인(<code>/login</code>), <code>ANTHROPIC_AUTH_TOKEN</code>, Workload Identity Federation 등 — 을 지원한다. API 키는 여러 인증 방식 중 하나일 뿐이다.
 <br><br>
 <strong>Bedrock도 <code>InvokeModel</code>만 쓰지 않는다.</strong> AWS는 <strong>두 엔드포인트</strong>를 제공한다 — 고전 <code>bedrock-runtime</code>(<code>InvokeModel</code>·<code>Converse</code>, AWS SigV4 또는 최근엔 Bedrock API 키도 지원)과 신규 <code>bedrock-mantle</code>(<strong>Messages API 형식을 그대로 받는다</strong> — <code>anthropic_version</code> 바디 필드 없이 HTTP 헤더로만 처리, Bedrock API 키 또는 SigV4). 즉 <code>bedrock-mantle</code>에서는 "Bedrock=다른 형식"이라는 전제 자체가 성립하지 않는다.
 <br><br>
-<strong>이 실습이 실제로 쓰는 조합.</strong> <code>gateway.yaml</code>의 <code>upstreams.auth: {}</code>(비워 두면 <strong>게이트웨이가 실행되는 환경이 제공하는 AWS 자격증명 체인</strong>을 쓴다는 뜻 — 이 실습에서는 그 환경이 ECS이므로 <strong>ECS Task Role</strong>이 된다)는 <strong>고전 <code>bedrock-runtime</code> + AWS SigV4</strong> 조합을 가리킨다 — 이건 "Bedrock은 다 이렇다"는 보편적 사실이 아니라 이 프로젝트가 그 경로를 택한 것이다. CLI ↔ 게이트웨이 구간은 2단계에서 발급한 <strong>세션 토큰(JWT)</strong>으로, 게이트웨이 ↔ Bedrock 구간은 <strong>실행 환경의 AWS 자격증명(이 실습에서는 ECS Task Role) + SigV4</strong>로 인증한다 — 이 둘은 완전히 별개의 값이며, 게이트웨이가 CLI의 요청을 받아 이 형식·인증으로 바꿔 직접 호출하고 응답을 다시 Messages API 형식으로 바꿔 돌려준다. 이 변환을 <strong>게이트웨이 자신이 수행</strong>하므로 CLI는 업스트림이 무엇인지 알 필요가 없다.
+<strong>이 실습이 쓰는 조합.</strong> 이 실습의 <code>gateway.yaml</code>은 <code>upstreams.auth: {}</code>로 비워 뒀다. 즉 게이트웨이가 실행되는 환경(이 실습에서는 ECS)의 AWS 자격증명 체인을 그대로 쓰므로, 실제 자격증명은 <strong>ECS Task Role</strong>이다. 이는 위에서 설명한 <strong>고전 <code>bedrock-runtime</code> + AWS SigV4</strong> 조합에 해당한다.
+<br><br>
+이 조합에서 구간별 인증은 서로 다른 두 값을 쓴다. CLI ↔ 게이트웨이 구간은 2단계에서 발급한 <strong>세션 토큰(JWT)</strong>으로 인증한다. 헤더 형식은 위에서 말한 Messages API의 <code>Authorization: Bearer</code>를 그대로 쓰지만, 담긴 값은 Anthropic의 OAuth 토큰이 아니라 이 게이트웨이가 발급한 자체 세션 토큰이다. 게이트웨이 ↔ Bedrock 구간은 <strong>실행 환경의 AWS 자격증명(이 실습에서는 ECS Task Role) + SigV4</strong>로 인증한다. 게이트웨이가 CLI의 요청을 받아 이 형식·인증으로 바꿔 직접 호출하고, 응답을 다시 Messages API 형식으로 바꿔 돌려준다. 이 변환을 <strong>게이트웨이 자신이 수행</strong>하므로 CLI는 업스트림이 무엇인지 알 필요가 없다.
 </div>
 
 <h2>5단계. 세션 만료와 재로그인</h2>
@@ -127,7 +123,7 @@ CLI가 보내는 <strong>Anthropic Messages API</strong> 형식과 Bedrock의 <s
 
 <div class="callout">
 <strong>"조용히"의 기술적 의미 — 리프레시 토큰 그랜트(refresh token grant)로, 사용자 상호작용이 없는 서버 대 서버 호출이다.</strong>
-일반 로그인은 브라우저 리다이렉트(<code>302</code>)를 거쳐 사용자가 IdP 로그인 화면에서 자격증명을 입력하는 <strong>authorization code flow</strong>다. 이건 사용자 액션이 필수다. 반면 세션 만료 직전의 갱신은 이 흐름을 전혀 타지 않는다. 1단계에서 게이트웨이는 <code>id_token</code>과 함께 <strong>리프레시 토큰</strong>도 받아 저장해 두는데(<a href="0004-device-auth-flow.html">Lesson 4</a>), 만료가 다가오면 게이트웨이는 브라우저에 아무것도 띄우지 않고 이 리프레시 토큰을 들고 <strong>IdP의 토큰 엔드포인트에 직접 HTTP 요청</strong>을 보낸다(OAuth 2.0의 <code>grant_type=refresh_token</code> 요청). IdP는 계정이 여전히 활성 상태인지 확인한 뒤, 유효하면 새 <code>id_token</code>(+ 새 리프레시 토큰)을 돌려주고, 게이트웨이는 이 응답으로 새 세션 토큰(JWT)을 발급한다. 이 전체 과정이 서버 대 서버 HTTP 요청 하나로 끝나므로 브라우저 리다이렉트나 사용자 입력이 전혀 개입하지 않는다 — 이것이 "조용히"가 가리키는 정확한 동작이다.
+일반 로그인은 브라우저 리다이렉트(<code>302</code>)를 거쳐 사용자가 IdP 로그인 화면에서 자격증명을 입력하는 <strong>authorization code flow</strong>다(브라우저 리다이렉트 → IdP 로그인 → 콜백, <a href="0004-device-auth-flow.html">Lesson 4의 5~7단계 다이어그램</a> 참조). 이건 사용자 액션이 필수다. 반면 세션이 만료되기 전에 시도되는 갱신(정확한 시점은 공개되지 않음)은 이 흐름을 전혀 타지 않는다. 1단계에서 게이트웨이는 <code>id_token</code>과 함께 <strong>리프레시 토큰</strong>도 받아 저장해 두는데(<a href="0004-device-auth-flow.html">Lesson 4</a>), 만료가 다가오면 게이트웨이는 브라우저에 아무것도 띄우지 않고 이 리프레시 토큰을 들고 <strong>IdP의 토큰 엔드포인트에 직접 HTTP 요청</strong>을 보낸다(OAuth 2.0의 <code>grant_type=refresh_token</code> 요청). IdP는 계정이 여전히 활성 상태인지 확인한 뒤, 유효하면 새 <code>id_token</code>(+ 새 리프레시 토큰)을 돌려주고, 게이트웨이는 이 응답으로 새 세션 토큰(JWT)을 발급한다. 이 전체 과정이 서버 대 서버 HTTP 요청 하나로 끝나므로 브라우저 리다이렉트나 사용자 입력이 전혀 개입하지 않는다 — 이것이 "조용히"가 가리키는 정확한 동작이다.
 <br><br>
 IdP가 계정을 비활성화했다면, 리프레시 토큰도 그 계정에 연결돼 있으므로 이 토큰 엔드포인트 요청 자체가 거부된다. 이때만 게이트웨이가 서버 대 서버 갱신을 포기하고, 처음으로 브라우저를 통한 <strong>authorization code flow</strong>(사용자 개입 필요)로 되돌아간다. 즉 "조용히"는 정확히 "리프레시 토큰 그랜트 경로"를, 그 반대는 "authorization code 그랜트 경로(사용자 로그인 화면)"를 가리킨다.
 </div>
@@ -152,7 +148,7 @@ IdP가 계정을 비활성화했다면, 리프레시 토큰도 그 계정에 연
 
 <div class="nav-links">
 <span><a href="0002-components.html">&larr; 이전</a></span>
-<span><a href="0004-device-auth-flow.html">다음: 디바이스 인증 &rarr;</a></span>
+<span><a href="0004-device-auth-flow.html">다음: 디바이스 인증·로그인·세션 확립 &rarr;</a></span>
 </div>
 
 </div>
